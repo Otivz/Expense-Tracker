@@ -4,20 +4,22 @@ import { Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { HapticTab } from '@/components/haptic-tab';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTheme } from '@/context/theme-context';
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
 
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: '#00684F', // Primary green
-        tabBarInactiveTintColor: '#6B7B77', // Muted secondary text
+        tabBarActiveTintColor: colors.primary, // Primary green from theme
+        tabBarInactiveTintColor: colors.textSecondary, // Muted secondary text
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarStyle: {
-          backgroundColor: '#FFFFFF', // Card color
-          borderTopColor: '#D7E5E0', // Divider color
+          backgroundColor: colors.card, // Card color from theme
+          borderTopColor: colors.border, // Divider color from theme
           borderTopWidth: 1,
           height: 52 + (insets.bottom > 0 ? insets.bottom : 12),
           paddingBottom: insets.bottom > 0 ? insets.bottom : 12,
@@ -77,6 +79,12 @@ export default function TabLayout() {
           tabBarIcon: ({ focused, color }) => (
             <Ionicons name={focused ? 'grid' : 'grid-outline'} size={24} color={color} />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="search"
+        options={{
+          href: null,
         }}
       />
     </Tabs>

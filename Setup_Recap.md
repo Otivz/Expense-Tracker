@@ -41,7 +41,7 @@ To launch the Metro Bundler (development server), run the following command in t
 ```bash
 npm start
 ```
-*Alternative: `npx expo start`*
+*Alternative: `npx expo start/npx expo start --tunnel`*
 
 ---
 
