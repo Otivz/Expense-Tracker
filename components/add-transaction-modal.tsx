@@ -1,0 +1,1232 @@
+import { useTheme } from '@/context/theme-context';
+import { useTransactions } from '@/hooks/useTransactions';
+import { Ionicons } from '@expo/vector-icons';
+import React, { useState } from 'react';
+import {
+  Alert,
+  Dimensions,
+  Modal,
+  PanResponder,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+
+const { width, height } = Dimensions.get('window');
+
+interface AddTransactionModalProps {
+  visible: boolean;
+  onClose: () => void;
+}
+
+const DEFAULT_ACCOUNTS = ['Savings', 'Untitled', 'Cash'];
+const DEFAULT_EXPENSE_CATEGORIES = ['Bills', 'Baby', 'Beauty', 'Car', 'Clothing', 'Food', 'Leisure', 'Shopping'];
+const DEFAULT_INCOME_CATEGORIES = ['Salary', 'Freelance', 'Investments', 'Gifts'];
+
+export function AddTransactionModal({ visible, onClose }: AddTransactionModalProps) {
+  const { colors, isDarkMode } = useTheme();
+  const { addTransaction } = useTransactions();
+
+  // Tab State
+  const [activeTab, setActiveTab] = useState<'income' | 'expense' | 'transfer'>('expense');
+
+  // Fields State
+  const [account, setAccount] = useState('Savings');
+  const [category, setCategory] = useState('Food');
+  const [fromAccount, setFromAccount] = useState('Savings');
+  const [toAccount, setToAccount] = useState('Untitled');
+  const [notes, setNotes] = useState('');
+  const [amountExpr, setAmountExpr] = useState('0');
+
+  // Date Picker States
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date('2026-06-30'));
+  const [pickerMonth, setPickerMonth] = useState(5); // June is 5
+
+  // Time Picker States
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [selectedHour, setSelectedHour] = useState(6);
+  const [selectedMinute, setSelectedMinute] = useState(20);
+  const [selectedPeriod, setSelectedPeriod] = useState<'AM' | 'PM'>('PM');
+
+  const dragTargetRef = React.useRef<'hour' | 'minute' | null>(null);
+
+  const handleClockTouch = (locationX: number, locationY: number, isNewTouch = false) => {
+    const dx = locationX - 100;
+    const dy = locationY - 100;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    let angleDeg = Math.atan2(dy, dx) * (180 / Math.PI) + 90;
+    if (angleDeg < 0) {
+      angleDeg += 360;
+    }
+    
+    if (isNewTouch) {
+      // Shorter Hour hand is targeted if touch is close to center (radius < 56)
+      dragTargetRef.current = distance < 56 ? 'hour' : 'minute';
+    }
+    
+    if (dragTargetRef.current === 'hour') {
+      let hour = Math.round(angleDeg / 30);
+      if (hour === 0) hour = 12;
+      if (hour > 12) hour = 12;
+      setSelectedHour(hour);
+    } else {
+      let minute = Math.round(angleDeg / 6);
+      if (minute === 60) minute = 0;
+      setSelectedMinute(minute);
+    }
+  };
+
+  const clockPanResponder = React.useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        const { locationX, locationY } = evt.nativeEvent;
+        handleClockTouch(locationX, locationY, true);
+      },
+      onPanResponderMove: (evt) => {
+        const { locationX, locationY } = evt.nativeEvent;
+        handleClockTouch(locationX, locationY, false);
+      },
+    })
+  ).current;
+
+  const MONTHS = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  const handleMonthChange = (direction: number) => {
+    let nextMonth = pickerMonth + direction;
+    if (nextMonth < 0) nextMonth = 11;
+    if (nextMonth > 11) nextMonth = 0;
+    setPickerMonth(nextMonth);
+  };
+
+  const renderPickerDays = () => {
+    const year = 2026;
+    const firstDayIndex = new Date(year, pickerMonth, 1).getDay();
+    const totalDays = new Date(year, pickerMonth + 1, 0).getDate();
+
+    const days: React.ReactNode[] = [];
+
+    // Empty spaces for first week offset
+    for (let i = 0; i < firstDayIndex; i++) {
+      days.push(<View key={`empty-${i}`} style={styles.pickerDayBtnEmpty} />);
+    }
+
+    // Day buttons
+    for (let day = 1; day <= totalDays; day++) {
+      const isSelected = selectedDate.getDate() === day && selectedDate.getMonth() === pickerMonth;
+      days.push(
+        <TouchableOpacity
+          key={`day-${day}`}
+          style={[styles.pickerDayBtn, isSelected && styles.pickerDayBtnSelected]}
+          onPress={() => {
+            const newDate = new Date(selectedDate);
+            newDate.setMonth(pickerMonth);
+            newDate.setDate(day);
+            setSelectedDate(newDate);
+          }}
+        >
+          <Text style={[
+            styles.pickerDayText,
+            { color: colors.text },
+            isSelected && styles.pickerDayTextSelected,
+          ]}>
+            {day}
+          </Text>
+        </TouchableOpacity>
+      );
+    }
+    return days;
+  };
+
+  // Selection overlays visibility
+  const [showAccountPicker, setShowAccountPicker] = useState(false);
+  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
+  const [pickerType, setPickerType] = useState<'account' | 'fromAccount' | 'toAccount'>('account');
+
+  // Handle calculator key press
+  const handleKeyPress = (val: string) => {
+    if (val === 'C') {
+      setAmountExpr('0');
+      return;
+    }
+
+    if (val === 'backspace') {
+      if (amountExpr.length <= 1) {
+        setAmountExpr('0');
+      } else {
+        setAmountExpr(amountExpr.slice(0, -1));
+      }
+      return;
+    }
+
+    if (val === '=') {
+      evaluateExpression();
+      return;
+    }
+
+    // Append to expression
+    if (amountExpr === '0' && !['+', '-', '*', '/', '.'].includes(val)) {
+      setAmountExpr(val);
+    } else {
+      // Prevent consecutive operators
+      const lastChar = amountExpr.slice(-1);
+      if (['+', '-', '*', '/'].includes(lastChar) && ['+', '-', '*', '/'].includes(val)) {
+        setAmountExpr(amountExpr.slice(0, -1) + val);
+      } else {
+        setAmountExpr(amountExpr + val);
+      }
+    }
+  };
+
+  const evaluateExpression = (): number => {
+    try {
+      // Clean expression for safe evaluation (replace × with *, ÷ with / if any)
+      const cleanExpr = amountExpr.replace(/×/g, '*').replace(/÷/g, '/');
+
+      // Simple math evaluator using Function (safe here as we only input numbers and operators from our restricted keypad)
+      // Validate that it only contains numbers, operators and decimals
+      if (!/^[0-9.+\-*/\s]+$/.test(cleanExpr)) {
+        return 0;
+      }
+
+      const result = new Function(`return (${cleanExpr})`)();
+      if (typeof result === 'number' && !isNaN(result) && isFinite(result)) {
+        const rounded = Math.round(result * 100) / 100;
+        setAmountExpr(rounded.toString());
+        return Math.max(0, rounded);
+      }
+      return 0;
+    } catch (e) {
+      Alert.alert('Calculation Error', 'Invalid arithmetic expression.');
+      return 0;
+    }
+  };
+
+  const handleSave = () => {
+    const finalAmount = evaluateExpression();
+    if (finalAmount <= 0) {
+      Alert.alert('Invalid Amount', 'Please enter an amount greater than zero.');
+      return;
+    }
+
+    const monthStr = (selectedDate.getMonth() + 1).toString().padStart(2, '0');
+    const dayStr = selectedDate.getDate().toString().padStart(2, '0');
+    const todayStr = `${selectedDate.getFullYear()}-${monthStr}-${dayStr}`;
+
+    if (activeTab === 'transfer') {
+      if (fromAccount === toAccount) {
+        Alert.alert('Invalid Transfer', 'Source and destination accounts must be different.');
+        return;
+      }
+      // Add as Expense from source account
+      addTransaction({
+        type: 'expense',
+        category: 'Transfer',
+        amount: finalAmount,
+        date: todayStr,
+        description: notes ? `Transfer to ${toAccount}: ${notes}` : `Transfer to ${toAccount}`,
+        accountName: fromAccount,
+      });
+
+      // Add as Income to destination account
+      addTransaction({
+        type: 'income',
+        category: 'Transfer',
+        amount: finalAmount,
+        date: todayStr,
+        description: notes ? `Transfer from ${fromAccount}: ${notes}` : `Transfer from ${fromAccount}`,
+        accountName: toAccount,
+      });
+    } else {
+      addTransaction({
+        type: activeTab,
+        category: category,
+        amount: finalAmount,
+        date: todayStr,
+        description: notes,
+        accountName: account,
+      });
+    }
+
+    // Reset states
+    setAmountExpr('0');
+    setNotes('');
+    onClose();
+  };
+
+  const openAccountPicker = (type: 'account' | 'fromAccount' | 'toAccount') => {
+    setPickerType(type);
+    setShowAccountPicker(true);
+  };
+
+  // Keyboard Rows
+  const keypad = [
+    ['+', '7', '8', '9'],
+    ['-', '4', '5', '6'],
+    ['*', '1', '2', '3'],
+    ['/', '0', '.', '='],
+  ];
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent={true}
+      statusBarTranslucent={true}
+    >
+      <View style={[styles.modalContainer, { backgroundColor: colors.card }]}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={onClose}>
+            <Text style={[styles.headerBtnText, { color: isDarkMode ? '#FFFFFF' : colors.primary }]}>CANCEL</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleSave}>
+            <Text style={[styles.headerBtnText, { color: isDarkMode ? '#FFFFFF' : colors.primary }]}>SAVE</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Segmented Control */}
+        <View style={[styles.tabsContainer, { backgroundColor: isDarkMode ? '#1D2E2B' : '#EAF4F1' }]}>
+          {(['income', 'expense', 'transfer'] as const).map((tab) => {
+            const isSelected = activeTab === tab;
+            return (
+              <TouchableOpacity
+                key={tab}
+                style={[
+                  styles.tabButton,
+                  isSelected && { backgroundColor: isDarkMode ? colors.primary : '#FFFFFF' },
+                ]}
+                onPress={() => {
+                  setActiveTab(tab);
+                  // Update default category based on type
+                  setCategory(tab === 'income' ? 'Salary' : 'Food');
+                }}
+              >
+                {isSelected && (
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={16}
+                    color={isDarkMode ? '#FFFFFF' : '#00684F'}
+                    style={{ marginRight: 4 }}
+                  />
+                )}
+                <Text
+                  style={[
+                    styles.tabButtonText,
+                    { color: isSelected ? (isDarkMode ? '#FFFFFF' : '#00684F') : colors.textSecondary },
+                  ]}
+                >
+                  {tab.toUpperCase()}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* Selectors Grid */}
+        <View style={styles.selectorsGrid}>
+          {activeTab === 'transfer' ? (
+            <>
+              {/* From Account Selector */}
+              <View style={styles.selectorCol}>
+                <Text style={[styles.selectorLabel, { color: colors.textSecondary }]}>From</Text>
+                <TouchableOpacity
+                  style={[styles.selectorButton, { borderColor: colors.border }]}
+                  onPress={() => openAccountPicker('fromAccount')}
+                >
+                  <Ionicons name="wallet-outline" size={18} color={colors.primary} />
+                  <Text style={[styles.selectorValueText, { color: colors.text }]} numberOfLines={1}>
+                    {fromAccount}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* To Account Selector */}
+              <View style={styles.selectorCol}>
+                <Text style={[styles.selectorLabel, { color: colors.textSecondary }]}>To</Text>
+                <TouchableOpacity
+                  style={[styles.selectorButton, { borderColor: colors.border }]}
+                  onPress={() => openAccountPicker('toAccount')}
+                >
+                  <Ionicons name="wallet-outline" size={18} color={colors.primary} />
+                  <Text style={[styles.selectorValueText, { color: colors.text }]} numberOfLines={1}>
+                    {toAccount}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <>
+              {/* Account Selector */}
+              <View style={styles.selectorCol}>
+                <Text style={[styles.selectorLabel, { color: colors.textSecondary }]}>Account</Text>
+                <TouchableOpacity
+                  style={[styles.selectorButton, { borderColor: colors.border }]}
+                  onPress={() => openAccountPicker('account')}
+                >
+                  <Ionicons name="wallet-outline" size={18} color={colors.primary} />
+                  <Text style={[styles.selectorValueText, { color: colors.text }]} numberOfLines={1}>
+                    {account}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Category Selector */}
+              <View style={styles.selectorCol}>
+                <Text style={[styles.selectorLabel, { color: colors.textSecondary }]}>Category</Text>
+                <TouchableOpacity
+                  style={[styles.selectorButton, { borderColor: colors.border }]}
+                  onPress={() => setShowCategoryPicker(true)}
+                >
+                  <Ionicons name="pricetag-outline" size={18} color={colors.primary} />
+                  <Text style={[styles.selectorValueText, { color: colors.text }]} numberOfLines={1}>
+                    {category}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+        </View>
+
+        {/* Notes Input */}
+        <TextInput
+          style={[
+            styles.notesInput,
+            {
+              borderColor: colors.border,
+              backgroundColor: isDarkMode ? '#243330' : '#F4FAF8',
+              color: colors.text,
+            },
+          ]}
+          placeholder="Add notes"
+          placeholderTextColor={colors.textSecondary}
+          value={notes}
+          onChangeText={setNotes}
+          multiline
+        />
+
+        {/* Spacer to push calculator and keypad to the bottom */}
+        <View style={{ flex: 1 }} />
+
+        {/* Calculator Output View */}
+        <View style={[styles.calcOutputContainer, { borderColor: colors.border }]}>
+          <Text style={[styles.calcExprText, { color: colors.text }]} numberOfLines={1}>
+            {amountExpr}
+          </Text>
+          <TouchableOpacity onPress={() => handleKeyPress('backspace')} style={styles.backspaceBtn}>
+            <Ionicons name="backspace-outline" size={24} color={colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Keypad Grid */}
+        <View style={styles.keypadGrid}>
+          {keypad.map((row, rIdx) => (
+            <View key={rIdx} style={styles.keypadRow}>
+              {row.map((btn) => {
+                const isOperator = ['+', '-', '*', '/'].includes(btn);
+                const isEquals = btn === '=';
+
+                // Label transformations for cleaner display
+                let label = btn;
+                if (btn === '*') label = '×';
+                if (btn === '/') label = '÷';
+
+                return (
+                  <TouchableOpacity
+                    key={btn}
+                    style={[
+                      styles.keypadBtn,
+                      { borderColor: colors.border },
+                      isOperator && { backgroundColor: isDarkMode ? '#283B38' : '#D0DFDC' },
+                      isEquals && { backgroundColor: colors.primary },
+                    ]}
+                    onPress={() => handleKeyPress(btn)}
+                  >
+                    <Text
+                      style={[
+                        styles.keypadBtnText,
+                        { color: isEquals ? '#FFFFFF' : colors.text },
+                        isOperator && { color: colors.primary, fontWeight: '700' },
+                      ]}
+                    >
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ))}
+        </View>
+
+        {/* Date and Time Footer */}
+        <View style={[styles.footerRow, { borderTopColor: colors.border }]}>
+          <TouchableOpacity onPress={() => setShowDatePicker(true)} style={styles.footerCol}>
+            <Text style={[styles.footerText, { color: colors.text }]}>
+              {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+            </Text>
+          </TouchableOpacity>
+          <View style={[styles.footerDivider, { backgroundColor: colors.border }]} />
+          <TouchableOpacity onPress={() => setShowTimePicker(true)} style={styles.footerCol}>
+            <Text style={[styles.footerText, { color: colors.text }]}>
+              {selectedHour}:{selectedMinute.toString().padStart(2, '0')} {selectedPeriod}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Account Picker Modal overlay */}
+      <Modal visible={showAccountPicker} transparent animationType="fade">
+        <TouchableOpacity
+          style={styles.pickerOverlay}
+          activeOpacity={1}
+          onPress={() => setShowAccountPicker(false)}
+        >
+          <View style={[styles.pickerCard, { backgroundColor: colors.card }]}>
+            <Text style={[styles.pickerTitle, { color: colors.text }]}>Select Account</Text>
+            {DEFAULT_ACCOUNTS.map((acc) => (
+              <TouchableOpacity
+                key={acc}
+                style={[styles.pickerOption, { borderBottomColor: colors.divider }]}
+                onPress={() => {
+                  if (pickerType === 'account') setAccount(acc);
+                  if (pickerType === 'fromAccount') setFromAccount(acc);
+                  if (pickerType === 'toAccount') setToAccount(acc);
+                  setShowAccountPicker(false);
+                }}
+              >
+                <Text style={[styles.pickerOptionText, { color: colors.text }]}>{acc}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Category Picker Modal overlay */}
+      <Modal visible={showCategoryPicker} transparent animationType="fade">
+        <TouchableOpacity
+          style={styles.pickerOverlay}
+          activeOpacity={1}
+          onPress={() => setShowCategoryPicker(false)}
+        >
+          <View style={[styles.pickerCard, { backgroundColor: colors.card }]}>
+            <Text style={[styles.pickerTitle, { color: colors.text }]}>Select Category</Text>
+            <ScrollView style={{ maxHeight: 300 }}>
+              {(activeTab === 'income' ? DEFAULT_INCOME_CATEGORIES : DEFAULT_EXPENSE_CATEGORIES).map((cat) => (
+                <TouchableOpacity
+                  key={cat}
+                  style={[styles.pickerOption, { borderBottomColor: colors.divider }]}
+                  onPress={() => {
+                    setCategory(cat);
+                    setShowCategoryPicker(false);
+                  }}
+                >
+                  <Text style={[styles.pickerOptionText, { color: colors.text }]}>{cat}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Custom Calendar Date Picker Modal */}
+      <Modal visible={showDatePicker} transparent animationType="fade" onRequestClose={() => setShowDatePicker(false)}>
+        <View style={styles.pickerOverlay}>
+          <View style={[styles.customDatePickerCard, { backgroundColor: isDarkMode ? '#323232' : colors.card }]}>
+            {/* Header */}
+            <View style={[styles.customDatePickerHeader, { backgroundColor: isDarkMode ? '#484848' : '#00684F' }]}>
+              <Text style={[styles.customDatePickerHeaderYear, { color: isDarkMode ? '#B0B0B0' : 'rgba(255,255,255,0.75)' }]}>2026</Text>
+              <Text style={styles.customDatePickerHeaderDate}>
+                {selectedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+              </Text>
+            </View>
+
+            {/* Month Control */}
+            <View style={styles.customDatePickerMonthCtrl}>
+              <TouchableOpacity onPress={() => handleMonthChange(-1)} style={styles.chevronControlBtn}>
+                <Ionicons name="chevron-back" size={20} color={colors.text} />
+              </TouchableOpacity>
+              <Text style={[styles.customDatePickerMonthLabel, { color: colors.text }]}>
+                {MONTHS[pickerMonth]} 2026
+              </Text>
+              <TouchableOpacity onPress={() => handleMonthChange(1)} style={styles.chevronControlBtn}>
+                <Ionicons name="chevron-forward" size={20} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Weekdays Row */}
+            <View style={styles.customDatePickerWeekdays}>
+              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, idx) => (
+                <Text key={idx} style={[styles.customDatePickerWeekdayText, { color: colors.textSecondary }]}>{day}</Text>
+              ))}
+            </View>
+
+            {/* Days Grid */}
+            <View style={styles.customDatePickerDaysGrid}>
+              {renderPickerDays()}
+            </View>
+
+            {/* Action Row */}
+            <View style={[styles.customDatePickerActions, { borderTopColor: isDarkMode ? '#404040' : colors.divider }]}>
+              <TouchableOpacity onPress={() => setShowDatePicker(false)} style={styles.customDatePickerActionBtn}>
+                <Text style={[styles.customDatePickerActionText, { color: colors.primary }]}>CANCEL</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowDatePicker(false)} style={styles.customDatePickerActionBtn}>
+                <Text style={[styles.customDatePickerActionText, { color: colors.primary }]}>OK</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Custom Time Picker Modal */}
+      <Modal visible={showTimePicker} transparent animationType="fade" onRequestClose={() => setShowTimePicker(false)}>
+        <View style={styles.pickerOverlay}>
+          <View style={[styles.setTimeCard, { backgroundColor: colors.card }]}>
+
+
+            {/* Analog Clock */}
+            <View style={styles.setTimeClockArea}>
+              <View style={[
+                styles.setTimeClockOuter,
+                { borderColor: isDarkMode ? '#2ED8A5' : '#00684F', backgroundColor: isDarkMode ? '#1A2E2B' : '#F4FAF8' }
+              ]}>
+                <View style={styles.setTimeClockFace} {...clockPanResponder.panHandlers}>
+
+                  {/* Tick marks */}
+                  {Array.from({ length: 60 }).map((_, i) => {
+                    const isHourTick = i % 5 === 0;
+                    const tickAngle = (i * 6 * Math.PI) / 180;
+                    const outerR = 104;
+                    const innerR = isHourTick ? 91 : 98;
+                    const x1 = outerR * Math.sin(tickAngle);
+                    const y1 = -outerR * Math.cos(tickAngle);
+                    const x2 = innerR * Math.sin(tickAngle);
+                    const y2 = -innerR * Math.cos(tickAngle);
+                    const length = Math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2);
+                    const tickRotation = Math.atan2(y2 - y1, x2 - x1) * (180 / Math.PI);
+                    const midX = (x1 + x2) / 2;
+                    const midY = (y1 + y2) / 2;
+                    return (
+                      <View
+                        key={`tick-${i}`}
+                        pointerEvents="none"
+                        style={{
+                          position: 'absolute',
+                          width: length,
+                          height: isHourTick ? 2 : 1,
+                          backgroundColor: isHourTick ? colors.text : colors.textSecondary,
+                          left: '50%',
+                          top: '50%',
+                          marginLeft: midX - length / 2,
+                          marginTop: midY - (isHourTick ? 1 : 0.5),
+                          transform: [{ rotate: `${tickRotation}deg` }],
+                        }}
+                      />
+                    );
+                  })}
+
+                  {/* Hour numbers */}
+                  {([12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as const).map((h) => {
+                    const angle = (h * 30 * Math.PI) / 180;
+                    const radius = 76;
+                    const x = radius * Math.sin(angle);
+                    const y = -radius * Math.cos(angle);
+                    return (
+                      <View
+                        key={h}
+                        pointerEvents="none"
+                        style={{
+                          position: 'absolute',
+                          width: 26,
+                          height: 26,
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          left: '50%',
+                          top: '50%',
+                          marginLeft: x - 13,
+                          marginTop: y - 13,
+                        }}
+                      >
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: colors.text }}>
+                          {h}
+                        </Text>
+                      </View>
+                    );
+                  })}
+
+                  {/* Hour Hand */}
+                  <View
+                    pointerEvents="none"
+                    style={{
+                      position: 'absolute',
+                      width: 5,
+                      height: 56,
+                      bottom: '50%',
+                      left: '50%',
+                      marginLeft: -2.5,
+                      borderRadius: 3,
+                      backgroundColor: colors.text,
+                      transformOrigin: 'bottom center',
+                      transform: [{ rotate: `${(selectedHour % 12) * 30 + (selectedMinute / 60) * 30}deg` }],
+                    }}
+                  />
+
+                  {/* Minute Hand */}
+                  <View
+                    pointerEvents="none"
+                    style={{
+                      position: 'absolute',
+                      width: 3,
+                      height: 82,
+                      bottom: '50%',
+                      left: '50%',
+                      marginLeft: -1.5,
+                      borderRadius: 2,
+                      backgroundColor: colors.primary,
+                      transformOrigin: 'bottom center',
+                      transform: [{ rotate: `${selectedMinute * 6}deg` }],
+                    }}
+                  />
+
+                  {/* Center dot */}
+                  <View
+                    pointerEvents="none"
+                    style={{
+                      position: 'absolute',
+                      width: 10,
+                      height: 10,
+                      borderRadius: 5,
+                      backgroundColor: colors.primary,
+                      zIndex: 10,
+                    }}
+                  />
+                </View>
+              </View>
+            </View>
+
+            {/* Spinners Row */}
+            <View style={styles.setTimeSpinnersRow}>
+              {/* Hour */}
+              <View style={styles.setTimeSpinnerBox}>
+                <TouchableOpacity onPress={() => setSelectedHour(h => h === 12 ? 1 : h + 1)} style={styles.setTimeSpinnerArrow}>
+                  <Ionicons name="chevron-up" size={18} color={colors.primary} />
+                </TouchableOpacity>
+                <View style={[styles.setTimeSpinnerValueBox, { backgroundColor: isDarkMode ? '#1D2E2B' : '#EAF4F1', borderColor: colors.divider }]}>
+                  <Text style={[styles.setTimeSpinnerValue, { color: colors.text }]}>
+                    {selectedHour.toString().padStart(2, '0')}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => setSelectedHour(h => h === 1 ? 12 : h - 1)} style={styles.setTimeSpinnerArrow}>
+                  <Ionicons name="chevron-down" size={18} color={colors.primary} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={[styles.setTimeSpinnerColon, { color: colors.text }]}>:</Text>
+
+              {/* Minute */}
+              <View style={styles.setTimeSpinnerBox}>
+                <TouchableOpacity onPress={() => setSelectedMinute(m => m === 59 ? 0 : m + 1)} style={styles.setTimeSpinnerArrow}>
+                  <Ionicons name="chevron-up" size={18} color={colors.primary} />
+                </TouchableOpacity>
+                <View style={[styles.setTimeSpinnerValueBox, { backgroundColor: isDarkMode ? '#1D2E2B' : '#EAF4F1', borderColor: colors.divider }]}>
+                  <Text style={[styles.setTimeSpinnerValue, { color: colors.text }]}>
+                    {selectedMinute.toString().padStart(2, '0')}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => setSelectedMinute(m => m === 0 ? 59 : m - 1)} style={styles.setTimeSpinnerArrow}>
+                  <Ionicons name="chevron-down" size={18} color={colors.primary} />
+                </TouchableOpacity>
+              </View>
+
+              {/* AM/PM */}
+              <View style={[styles.setTimeSpinnerBox, { marginLeft: 10 }]}>
+                <TouchableOpacity onPress={() => setSelectedPeriod(p => p === 'AM' ? 'PM' : 'AM')} style={styles.setTimeSpinnerArrow}>
+                  <Ionicons name="chevron-up" size={18} color={colors.primary} />
+                </TouchableOpacity>
+                <View style={[styles.setTimeSpinnerValueBox, { backgroundColor: isDarkMode ? '#1D2E2B' : '#EAF4F1', borderColor: colors.divider }]}>
+                  <Text style={[styles.setTimeSpinnerValue, { color: colors.text }]}>{selectedPeriod}</Text>
+                </View>
+                <TouchableOpacity onPress={() => setSelectedPeriod(p => p === 'AM' ? 'PM' : 'AM')} style={styles.setTimeSpinnerArrow}>
+                  <Ionicons name="chevron-down" size={18} color={colors.primary} />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Actions — mirrors calendar action row */}
+            <View style={[styles.customDatePickerActions, { borderTopColor: isDarkMode ? '#2D3D3A' : colors.divider }]}>
+              <TouchableOpacity onPress={() => setShowTimePicker(false)} style={styles.customDatePickerActionBtn}>
+                <Text style={[styles.customDatePickerActionText, { color: colors.primary }]}>CANCEL</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowTimePicker(false)} style={styles.customDatePickerActionBtn}>
+                <Text style={[styles.customDatePickerActionText, { color: colors.primary }]}>OK</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  modalOverlay: {
+    flex: 1,
+  },
+  modalContainer: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 52 : 48,
+    paddingBottom: Platform.OS === 'ios' ? 44 : 70,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    marginBottom: 8,
+  },
+  headerBtnText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFB300', // Gold/yellow color matching screenshot Cancel/Save
+    letterSpacing: 0.5,
+  },
+  tabsContainer: {
+    flexDirection: 'row',
+    borderRadius: 14,
+    padding: 4,
+    marginBottom: 16,
+  },
+  tabButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  tabButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  selectorsGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 14,
+  },
+  selectorCol: {
+    flex: 1,
+  },
+  selectorLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  selectorButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    gap: 6,
+  },
+  selectorValueText: {
+    fontSize: 14,
+    fontWeight: '700',
+    maxWidth: '78%',
+  },
+  notesInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    fontSize: 15,
+    height: 80,
+    textAlignVertical: 'top',
+    marginBottom: 14,
+  },
+  calcOutputContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 14,
+  },
+  calcExprText: {
+    fontSize: 32,
+    fontWeight: '500',
+    flex: 1,
+  },
+  backspaceBtn: {
+    padding: 4,
+  },
+  keypadGrid: {
+    flexDirection: 'column',
+    gap: 8,
+    marginBottom: 16,
+  },
+  keypadRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  keypadBtn: {
+    flex: 1,
+    height: 60,
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  keypadBtnText: {
+    fontSize: 20,
+    fontWeight: '600',
+  },
+  footerRow: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    paddingTop: 12,
+    alignItems: 'center',
+  },
+  footerCol: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  footerText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  footerDivider: {
+    width: 1,
+    height: 18,
+  },
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  setTimeCard: {
+    width: width * 0.85,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  setTimeHeader: {
+    padding: 20,
+  },
+  setTimeHeaderLabel: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  setTimeHeaderTime: {
+    color: '#FFFFFF',
+    fontSize: 30,
+    fontWeight: '700',
+  },
+  setTimeClockArea: {
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+  },
+  setTimeClockOuter: {
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    borderWidth: 5,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  setTimeClockFace: {
+    width: 210,
+    height: 210,
+    borderRadius: 105,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  setTimeSpinnersRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    gap: 4,
+  },
+  setTimeSpinnerBox: {
+    alignItems: 'center',
+    gap: 2,
+  },
+  setTimeSpinnerArrow: {
+    padding: 4,
+  },
+  setTimeSpinnerValueBox: {
+    width: 60,
+    height: 44,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  setTimeSpinnerValue: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  setTimeSpinnerColon: {
+    fontSize: 24,
+    fontWeight: '700',
+    marginHorizontal: 4,
+    marginTop: -4,
+  },
+  setTimeConfirmBtn: {},
+  setTimeConfirmText: {},
+  setTimeCancelText: {},
+  pickerCard: {
+    width: width * 0.8,
+    borderRadius: 16,
+    padding: 20,
+    maxHeight: 400,
+  },
+  pickerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 14,
+    textAlign: 'center',
+  },
+  pickerOption: {
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
+  pickerOptionText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  customDatePickerCard: {
+    width: width * 0.85,
+    backgroundColor: '#323232',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  customDatePickerHeader: {
+    backgroundColor: '#484848',
+    padding: 20,
+  },
+  customDatePickerHeaderYear: {
+    color: '#B0B0B0',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  customDatePickerHeaderDate: {
+    color: '#2ED8A5',
+    fontSize: 28,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  customDatePickerMonthCtrl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  customDatePickerMonthLabel: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  chevronControlBtn: {
+    padding: 6,
+  },
+  customDatePickerWeekdays: {
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    marginBottom: 8,
+  },
+  customDatePickerWeekdayText: {
+    flex: 1,
+    color: '#888888',
+    textAlign: 'center',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  customDatePickerDaysGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 12,
+    marginBottom: 16,
+  },
+  pickerDayBtn: {
+    width: `${100 / 7}%`,
+    aspectRatio: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 18,
+  },
+  pickerDayBtnEmpty: {
+    width: `${100 / 7}%`,
+    aspectRatio: 1,
+  },
+  pickerDayBtnSelected: {
+    backgroundColor: '#2ED8A5',
+  },
+  pickerDayText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  pickerDayTextSelected: {
+    color: '#000000',
+    fontWeight: '700',
+  },
+  customDatePickerActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    padding: 12,
+    gap: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#404040',
+  },
+  customDatePickerActionBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  customDatePickerActionText: {
+    color: '#2ED8A5',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  customTimePickerCard: {
+    width: width * 0.85,
+    backgroundColor: '#323232',
+    borderRadius: 8,
+    paddingTop: 20,
+    overflow: 'hidden',
+  },
+  customTimePickerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    marginBottom: 20,
+    gap: 12,
+  },
+  customTimePickerTimeText: {
+    fontSize: 48,
+    fontWeight: '700',
+    color: '#2ED8A5',
+  },
+  customTimePickerAmPm: {
+    gap: 4,
+  },
+  customTimePickerAmPmText: {
+    color: '#888888',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  customTimePickerAmPmActive: {
+    color: '#2ED8A5',
+  },
+  clockContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
+  },
+  clockCircle: {
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: '#2A2A2A',
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  clockCenterDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#2ED8A5',
+    zIndex: 5,
+  },
+  clockHandHour: {
+    position: 'absolute',
+    height: 48,
+    width: 4,
+    bottom: '50%',
+    left: '50%',
+    marginLeft: -2,
+    zIndex: 3,
+    transformOrigin: 'bottom center',
+  },
+  clockHandHourLine: {
+    flex: 1,
+    backgroundColor: '#2ED8A5',
+    opacity: 0.75,
+  },
+  clockHand: {
+    position: 'absolute',
+    height: 76,
+    width: 2,
+    bottom: '50%',
+    left: '50%',
+    marginLeft: -1,
+    zIndex: 4,
+    transformOrigin: 'bottom center',
+  },
+  clockHandLine: {
+    flex: 1,
+    backgroundColor: '#2ED8A5',
+  },
+  clockHandSelectionCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#FFB300',
+    position: 'absolute',
+    top: -12,
+    left: -11,
+  },
+  clockHourBtn: {
+    position: 'absolute',
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 16,
+    zIndex: 6,
+  },
+  clockHourBtnActive: {
+    backgroundColor: '#2ED8A5',
+  },
+  clockHourText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  clockHourTextActive: {
+    color: '#000000',
+    fontWeight: '700',
+  },
+});
