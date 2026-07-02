@@ -307,3 +307,4 @@ Take inspiration from:
 The final result should be clean, elegant, immersive, and worthy of a premium finance application.
 
 Focus heavily on polished animations and micro-interactions while keeping the interface minimalist.
+

@@ -54,3 +54,12 @@ We use **Supabase** (an open-source Firebase alternative) to power the app's bac
 | **Text Primary** | `#1C2A27` | Body headers, numbers, and main readable text |
 | **Text Secondary** | `#6B7B77` | Muted captions, helper texts, and inactive states |
 
+User
+   ↓
+C-Vault App
+   ↓
+SQLite (Local Database)
+   ↓
+Sync Manager
+   ↓
+Supabase Cloud
