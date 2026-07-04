@@ -1,14 +1,49 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, Text, Platform } from 'react-native';
 import { useTransactions } from '@/hooks/useTransactions';
 import { useTheme } from '@/context/theme-context';
+import { useSQLiteContext } from 'expo-sqlite';
+import { useVault } from '@/context/vault-context';
 
-export function AccountsSummary() {
+interface AccountsSummaryProps {
+  totalBalance?: number;
+}
+
+export function AccountsSummary({ totalBalance: propTotalBalance }: AccountsSummaryProps) {
   const { currentMonthIndex, transactions } = useTransactions();
   const { colors } = useTheme();
+  const db = useSQLiteContext();
+  const { currentAccount } = useVault();
+  const userId = currentAccount?.id || 'mock-user-id';
+
+  const [dbTotalBalance, setDbTotalBalance] = useState<number | null>(null);
+
+  useEffect(() => {
+    // Only load dynamic balance from SQLite if propTotalBalance is not provided
+    if (propTotalBalance === undefined) {
+      const loadTotalBalance = async () => {
+        try {
+          const result = await db.getFirstAsync<{ total: number | null }>(
+            'SELECT SUM(balance) as total FROM accounts WHERE user_id = ?',
+            userId
+          );
+          if (result && result.total !== null) {
+            setDbTotalBalance(result.total);
+          } else {
+            setDbTotalBalance(0);
+          }
+        } catch (err) {
+          console.error('Failed to load total balance for summary:', err);
+          setDbTotalBalance(0);
+        }
+      };
+      loadTotalBalance();
+    }
+  }, [propTotalBalance, userId, transactions]);
 
   const monthString = (currentMonthIndex + 1).toString().padStart(2, '0');
-  const monthPrefix = `2026-${monthString}`;
+  const currentYear = new Date().getFullYear();
+  const monthPrefix = `${currentYear}-${monthString}`;
   const monthlyTransactions = transactions.filter(t => t.date.startsWith(monthPrefix));
 
   const totalExpense = monthlyTransactions
@@ -19,15 +54,9 @@ export function AccountsSummary() {
     .filter(t => t.type === 'income')
     .reduce((sum, t) => sum + t.amount, 0);
 
-  const allTimeExpense = transactions
-    .filter(t => t.type === 'expense')
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const allTimeIncome = transactions
-    .filter(t => t.type === 'income')
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const totalBalance = 14055.00 + allTimeIncome - allTimeExpense; // Use reference base of 14,055.00 from screenshot
+  const totalBalance = propTotalBalance !== undefined 
+    ? propTotalBalance 
+    : (dbTotalBalance !== null ? dbTotalBalance : 0);
 
   const formatCurrency = (val: number) => {
     return `₱${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

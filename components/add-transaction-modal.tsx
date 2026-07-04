@@ -1,7 +1,11 @@
 import { useTheme } from '@/context/theme-context';
-import { useTransactions } from '@/hooks/useTransactions';
+import { useTransactions, type Transaction } from '@/hooks/useTransactions';
+import { useVault } from '@/context/vault-context';
+import { accountRepository } from '@/db/repositories/accountRepository';
+import { categoryRepository } from '@/db/repositories/categoryRepository';
+import { type Category } from '@/db/models/category';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Alert,
   Dimensions,
@@ -21,31 +25,115 @@ const { width, height } = Dimensions.get('window');
 interface AddTransactionModalProps {
   visible: boolean;
   onClose: () => void;
+  defaultAccount?: string;
+  transactionToEdit?: Transaction | null;
 }
 
-const DEFAULT_ACCOUNTS = ['Savings', 'Untitled', 'Cash'];
-const DEFAULT_EXPENSE_CATEGORIES = ['Bills', 'Baby', 'Beauty', 'Car', 'Clothing', 'Food', 'Leisure', 'Shopping'];
-const DEFAULT_INCOME_CATEGORIES = ['Salary', 'Freelance', 'Investments', 'Gifts'];
+// Hardcoded lists removed. Categories are fetched dynamically from database.
 
-export function AddTransactionModal({ visible, onClose }: AddTransactionModalProps) {
+export function AddTransactionModal({ visible, onClose, defaultAccount, transactionToEdit }: AddTransactionModalProps) {
   const { colors, isDarkMode } = useTheme();
-  const { addTransaction } = useTransactions();
+  const { addTransaction, deleteTransaction } = useTransactions();
+  const { currentAccount } = useVault();
+  const userId = currentAccount?.id || 'mock-user-id';
 
   // Tab State
   const [activeTab, setActiveTab] = useState<'income' | 'expense' | 'transfer'>('expense');
 
   // Fields State
-  const [account, setAccount] = useState('Savings');
-  const [category, setCategory] = useState('Food');
-  const [fromAccount, setFromAccount] = useState('Savings');
-  const [toAccount, setToAccount] = useState('Untitled');
+  const [account, setAccount] = useState('');
+  const [category, setCategory] = useState('');
+  const [fromAccount, setFromAccount] = useState('');
+  const [toAccount, setToAccount] = useState('');
   const [notes, setNotes] = useState('');
   const [amountExpr, setAmountExpr] = useState('0');
+  const [dbAccounts, setDbAccounts] = useState<string[]>([]);
+
+  const [dbCategories, setDbCategories] = useState<Category[]>([]);
+
+  // Load dynamic accounts & categories from SQLite database
+  useEffect(() => {
+    if (visible) {
+      const loadModalData = async () => {
+        try {
+          // Load accounts
+          const accs = await accountRepository.getAll(userId);
+          const names = accs.map(a => a.name);
+          setDbAccounts(names);
+          
+          if (!transactionToEdit) {
+            if (names.length > 0) {
+              if (defaultAccount && names.includes(defaultAccount)) {
+                setAccount(defaultAccount);
+              } else if (names.includes(account)) {
+                // keep current
+              } else {
+                setAccount(names[0]);
+              }
+
+              if (!names.includes(fromAccount)) {
+                setFromAccount(names[0]);
+              }
+              if (!names.includes(toAccount)) {
+                setToAccount(names[1] || names[0]);
+              }
+            } else {
+              setAccount('');
+              setFromAccount('');
+              setToAccount('');
+            }
+          }
+
+          // Load categories
+          const cats = await categoryRepository.getAll(userId);
+          setDbCategories(cats);
+          
+          if (!transactionToEdit) {
+            // Select default category
+            const filtered = cats.filter(c => c.type === activeTab);
+            if (filtered.length > 0) {
+              if (!filtered.some(c => c.name === category)) {
+                setCategory(filtered[0].name);
+              }
+            } else {
+              setCategory('');
+            }
+          }
+        } catch (err) {
+          console.error('Failed to load accounts and categories for transaction modal:', err);
+          setDbAccounts([]);
+          setDbCategories([]);
+        }
+      };
+      loadModalData();
+    }
+  }, [visible, userId, defaultAccount, activeTab, transactionToEdit]);
+
+  // Pre-fill fields for editing
+  useEffect(() => {
+    if (visible && transactionToEdit) {
+      setActiveTab(transactionToEdit.type);
+      setAccount(transactionToEdit.accountName || '');
+      setCategory(transactionToEdit.category);
+      setNotes(transactionToEdit.description || '');
+      setAmountExpr(transactionToEdit.amount.toString());
+      if (transactionToEdit.date) {
+        const d = new Date(transactionToEdit.date);
+        if (!isNaN(d.getTime())) {
+          setSelectedDate(d);
+        }
+      }
+    } else if (visible && !transactionToEdit) {
+      setAmountExpr('0');
+      setNotes('');
+      setSelectedDate(new Date());
+    }
+  }, [visible, transactionToEdit]);
 
   // Date Picker States
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(new Date('2026-06-30'));
-  const [pickerMonth, setPickerMonth] = useState(5); // June is 5
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [pickerMonth, setPickerMonth] = useState(new Date().getMonth());
 
   // Time Picker States
   const [showTimePicker, setShowTimePicker] = useState(false);
@@ -110,7 +198,7 @@ export function AddTransactionModal({ visible, onClose }: AddTransactionModalPro
   };
 
   const renderPickerDays = () => {
-    const year = 2026;
+    const year = new Date().getFullYear();
     const firstDayIndex = new Date(year, pickerMonth, 1).getDay();
     const totalDays = new Date(year, pickerMonth + 1, 0).getDate();
 
@@ -212,7 +300,7 @@ export function AddTransactionModal({ visible, onClose }: AddTransactionModalPro
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const finalAmount = evaluateExpression();
     if (finalAmount <= 0) {
       Alert.alert('Invalid Amount', 'Please enter an amount greater than zero.');
@@ -223,13 +311,22 @@ export function AddTransactionModal({ visible, onClose }: AddTransactionModalPro
     const dayStr = selectedDate.getDate().toString().padStart(2, '0');
     const todayStr = `${selectedDate.getFullYear()}-${monthStr}-${dayStr}`;
 
+    // Delete the old transaction first if we're editing
+    if (transactionToEdit) {
+      await deleteTransaction(transactionToEdit);
+    }
+
     if (activeTab === 'transfer') {
+      if (!fromAccount || !toAccount) {
+        Alert.alert('No Accounts Available', 'Please create at least two accounts before performing a transfer.');
+        return;
+      }
       if (fromAccount === toAccount) {
         Alert.alert('Invalid Transfer', 'Source and destination accounts must be different.');
         return;
       }
       // Add as Expense from source account
-      addTransaction({
+      await addTransaction({
         type: 'expense',
         category: 'Transfer',
         amount: finalAmount,
@@ -239,7 +336,7 @@ export function AddTransactionModal({ visible, onClose }: AddTransactionModalPro
       });
 
       // Add as Income to destination account
-      addTransaction({
+      await addTransaction({
         type: 'income',
         category: 'Transfer',
         amount: finalAmount,
@@ -248,7 +345,11 @@ export function AddTransactionModal({ visible, onClose }: AddTransactionModalPro
         accountName: toAccount,
       });
     } else {
-      addTransaction({
+      if (!account) {
+        Alert.alert('No Account Selected', 'Please create an account before adding a transaction.');
+        return;
+      }
+      await addTransaction({
         type: activeTab,
         category: category,
         amount: finalAmount,
@@ -493,7 +594,7 @@ export function AddTransactionModal({ visible, onClose }: AddTransactionModalPro
         >
           <View style={[styles.pickerCard, { backgroundColor: colors.card }]}>
             <Text style={[styles.pickerTitle, { color: colors.text }]}>Select Account</Text>
-            {DEFAULT_ACCOUNTS.map((acc) => (
+            {dbAccounts.map((acc) => (
               <TouchableOpacity
                 key={acc}
                 style={[styles.pickerOption, { borderBottomColor: colors.divider }]}
@@ -521,18 +622,20 @@ export function AddTransactionModal({ visible, onClose }: AddTransactionModalPro
           <View style={[styles.pickerCard, { backgroundColor: colors.card }]}>
             <Text style={[styles.pickerTitle, { color: colors.text }]}>Select Category</Text>
             <ScrollView style={{ maxHeight: 300 }}>
-              {(activeTab === 'income' ? DEFAULT_INCOME_CATEGORIES : DEFAULT_EXPENSE_CATEGORIES).map((cat) => (
-                <TouchableOpacity
-                  key={cat}
-                  style={[styles.pickerOption, { borderBottomColor: colors.divider }]}
-                  onPress={() => {
-                    setCategory(cat);
-                    setShowCategoryPicker(false);
-                  }}
-                >
-                  <Text style={[styles.pickerOptionText, { color: colors.text }]}>{cat}</Text>
-                </TouchableOpacity>
-              ))}
+              {dbCategories
+                .filter(c => c.type === activeTab)
+                .map((cat) => (
+                  <TouchableOpacity
+                    key={cat.id}
+                    style={[styles.pickerOption, { borderBottomColor: colors.divider }]}
+                    onPress={() => {
+                      setCategory(cat.name);
+                      setShowCategoryPicker(false);
+                    }}
+                  >
+                    <Text style={[styles.pickerOptionText, { color: colors.text }]}>{cat.name}</Text>
+                  </TouchableOpacity>
+                ))}
             </ScrollView>
           </View>
         </TouchableOpacity>
@@ -544,7 +647,7 @@ export function AddTransactionModal({ visible, onClose }: AddTransactionModalPro
           <View style={[styles.customDatePickerCard, { backgroundColor: isDarkMode ? '#323232' : colors.card }]}>
             {/* Header */}
             <View style={[styles.customDatePickerHeader, { backgroundColor: isDarkMode ? '#484848' : '#00684F' }]}>
-              <Text style={[styles.customDatePickerHeaderYear, { color: isDarkMode ? '#B0B0B0' : 'rgba(255,255,255,0.75)' }]}>2026</Text>
+              <Text style={[styles.customDatePickerHeaderYear, { color: isDarkMode ? '#B0B0B0' : 'rgba(255,255,255,0.75)' }]}>{selectedDate.getFullYear()}</Text>
               <Text style={styles.customDatePickerHeaderDate}>
                 {selectedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
               </Text>
@@ -556,7 +659,7 @@ export function AddTransactionModal({ visible, onClose }: AddTransactionModalPro
                 <Ionicons name="chevron-back" size={20} color={colors.text} />
               </TouchableOpacity>
               <Text style={[styles.customDatePickerMonthLabel, { color: colors.text }]}>
-                {MONTHS[pickerMonth]} 2026
+                {MONTHS[pickerMonth]} {new Date().getFullYear()}
               </Text>
               <TouchableOpacity onPress={() => handleMonthChange(1)} style={styles.chevronControlBtn}>
                 <Ionicons name="chevron-forward" size={20} color={colors.text} />

@@ -1,8 +1,13 @@
 import { Header } from '@/components/header';
 import { useTheme } from '@/context/theme-context';
 import { useTransactions } from '@/hooks/useTransactions';
+import { categoryRepository } from '@/db/repositories/categoryRepository';
+import { accountRepository } from '@/db/repositories/accountRepository';
+import { useVault } from '@/context/vault-context';
+import { useFocusEffect } from 'expo-router';
+import { type Category } from '@/db/models/category';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AddTransactionModal } from '@/components/add-transaction-modal';
 import { DisplayOptionsModal } from '@/components/display-options-modal';
 import {
@@ -43,12 +48,26 @@ const DROPDOWN_OPTIONS: DropdownOption[] = [
   'Account Analysis'
 ];
 
+const ACCOUNT_ICONS: Record<string, { icon: string; color: string; bgColor: string }> = {
+  cash: { icon: 'cash', color: '#0D8A63', bgColor: '#EAF4F1' },
+  card: { icon: 'credit-card', color: '#4D96FF', bgColor: '#EEF5FF' },
+  piggybank: { icon: 'piggy-bank', color: '#FF6B6B', bgColor: '#FFEAEA' },
+  visa: { icon: 'credit-card-outline', color: '#1A1F71', bgColor: '#E2ECFC' },
+};
+
 export default function AnalysisScreen() {
-  const { currentMonthIndex, setCurrentMonthIndex, transactions, addTransaction } = useTransactions();
+  const { currentMonthIndex, setCurrentMonthIndex, transactions } = useTransactions();
   const { colors: themeColors, isDarkMode } = useTheme();
+  const { currentAccount } = useVault();
+  const userId = currentAccount?.id || 'mock-user-id';
   const styles = getStyles(themeColors);
+
   const [selectedOption, setSelectedOption] = useState<DropdownOption>('Expense Overview');
   const [isDropdownVisible, setIsDropdownVisible] = useState(false);
+
+  // Database States
+  const [dbCategories, setDbCategories] = useState<Category[]>([]);
+  const [dbAccounts, setDbAccounts] = useState<any[]>([]);
 
   // Interactive calendar and details modal state
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
@@ -57,6 +76,7 @@ export default function AnalysisScreen() {
 
   // Account details modal state
   const [isAccountModalVisible, setIsAccountModalVisible] = useState(false);
+  const [selectedAccountForDetails, setSelectedAccountForDetails] = useState<any | null>(null);
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [displayModalVisible, setDisplayModalVisible] = useState(false);
   const [accountSortOrder, setAccountSortOrder] = useState<'new_to_old' | 'old_to_new'>('new_to_old');
@@ -65,7 +85,42 @@ export default function AnalysisScreen() {
   const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly' | '3months' | '6months' | 'yearly'>('monthly');
   const [showTotal, setShowTotal] = useState<'yes' | 'no'>('yes');
   const [carryOver, setCarryOver] = useState<'on' | 'off'>('on');
-  const [currentDate, setCurrentDate] = useState(new Date('2026-06-30'));
+  
+  const [currentDate, setCurrentDate] = useState(() => {
+    const d = new Date();
+    d.setMonth(currentMonthIndex);
+    return d;
+  });
+
+  const loadAnalysisData = useCallback(async () => {
+    try {
+      const [cats, accs] = await Promise.all([
+        categoryRepository.getAll(userId),
+        accountRepository.getAll(userId)
+      ]);
+      setDbCategories(cats);
+      setDbAccounts(accs);
+    } catch (err) {
+      console.error('Failed to load categories for analysis:', err);
+    }
+  }, [userId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadAnalysisData();
+    }, [loadAnalysisData])
+  );
+
+  useEffect(() => {
+    setCurrentDate(prev => {
+      if (prev.getMonth() !== currentMonthIndex) {
+        const d = new Date(prev);
+        d.setMonth(currentMonthIndex);
+        return d;
+      }
+      return prev;
+    });
+  }, [currentMonthIndex]);
 
   const getSelectorText = () => {
     const year = currentDate.getFullYear();
@@ -125,6 +180,7 @@ export default function AnalysisScreen() {
       newDate.setFullYear(newDate.getFullYear() - 1);
     }
     setCurrentDate(newDate);
+    setCurrentMonthIndex(newDate.getMonth());
   };
 
   const handleNextDate = () => {
@@ -143,6 +199,7 @@ export default function AnalysisScreen() {
       newDate.setFullYear(newDate.getFullYear() + 1);
     }
     setCurrentDate(newDate);
+    setCurrentMonthIndex(newDate.getMonth());
   };
 
   // Filter transactions for currently selected date range
@@ -202,6 +259,16 @@ export default function AnalysisScreen() {
 
   const formatCurrency = (val: number) => {
     return `₱${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+
+  const getCatColor = (name: string, index: number) => {
+    const cat = dbCategories.find(c => c.name.toLowerCase() === name.toLowerCase());
+    return cat?.color || ['#FF6B6B', '#4D96FF', '#6BCB77', '#FFA216', '#9B51E0', '#2D9CDB'][index % 6];
+  };
+
+  const getCatIcon = (name: string) => {
+    const cat = dbCategories.find(c => c.name.toLowerCase() === name.toLowerCase());
+    return cat?.icon || 'receipt-outline';
   };
 
   const totalExpense = monthTransactions
@@ -422,16 +489,6 @@ export default function AnalysisScreen() {
           percentage: (categoryMap[cat] / totalExpense) * 100,
         })).sort((a, b) => b.amount - a.amount);
 
-        const colors = ['#FF6B6B', '#4D96FF', '#6BCB77', '#FFA216', '#9B51E0', '#2D9CDB'];
-        const lightColors = ['#FFE3E3', '#E8F1FF', '#EAF8EB', '#FFF4E3', '#F5EDFD', '#E6F4FC'];
-        const icons = {
-          food: 'fast-food',
-          rent: 'home',
-          transport: 'bus',
-          leisure: 'game-controller',
-          shopping: 'cart',
-        };
-
         // Render simple dynamic SVG Donut Chart
         let currentStrokeOffset = 0;
         const circumference = 301.6; // 2 * pi * r (r = 48)
@@ -458,7 +515,7 @@ export default function AnalysisScreen() {
                           cx="60"
                           cy="60"
                           r="48"
-                          stroke={colors[idx % colors.length]}
+                          stroke={getCatColor(cat.name, idx)}
                           strokeWidth="14"
                           fill="none"
                           strokeDasharray={`${strokeLength} ${circumference}`}
@@ -476,7 +533,7 @@ export default function AnalysisScreen() {
               <View style={styles.legendContainer}>
                 {sortedCategories.slice(0, 4).map((cat, idx) => (
                   <View key={cat.name} style={styles.legendItem}>
-                    <View style={[styles.legendSquare, { backgroundColor: colors[idx % colors.length] }]} />
+                    <View style={[styles.legendSquare, { backgroundColor: getCatColor(cat.name, idx) }]} />
                     <Text style={styles.legendText}>{cat.name}</Text>
                   </View>
                 ))}
@@ -486,9 +543,9 @@ export default function AnalysisScreen() {
             <View style={styles.divider} />
 
             {sortedCategories.map((cat, idx) => {
-              const iconName = (icons as any)[cat.name.toLowerCase()] || 'receipt-outline';
-              const catColor = colors[idx % colors.length];
-              const lightColor = lightColors[idx % lightColors.length];
+              const iconName = getCatIcon(cat.name);
+              const catColor = getCatColor(cat.name, idx);
+              const lightColor = `${catColor}15`;
 
               return (
                 <View key={cat.name} style={styles.categoryItemRow}>
@@ -529,14 +586,6 @@ export default function AnalysisScreen() {
           percentage: (categoryMap[cat] / totalIncome) * 100,
         })).sort((a, b) => b.amount - a.amount);
 
-        const colors = ['#0D8A63', '#9B51E0', '#2D9CDB', '#FFA216'];
-        const lightColors = ['#EAF7F3', '#F5EDFD', '#E6F4FC', '#FFF4E3'];
-        const icons = {
-          salary: 'briefcase',
-          freelance: 'laptop-outline',
-          investments: 'trending-up',
-        };
-
         let currentStrokeOffset = 0;
         const circumference = 301.6;
 
@@ -562,7 +611,7 @@ export default function AnalysisScreen() {
                           cx="60"
                           cy="60"
                           r="48"
-                          stroke={colors[idx % colors.length]}
+                          stroke={getCatColor(cat.name, idx)}
                           strokeWidth="14"
                           fill="none"
                           strokeDasharray={`${strokeLength} ${circumference}`}
@@ -580,7 +629,7 @@ export default function AnalysisScreen() {
               <View style={styles.legendContainer}>
                 {sortedCategories.map((cat, idx) => (
                   <View key={cat.name} style={styles.legendItem}>
-                    <View style={[styles.legendSquare, { backgroundColor: colors[idx % colors.length] }]} />
+                    <View style={[styles.legendSquare, { backgroundColor: getCatColor(cat.name, idx) }]} />
                     <Text style={styles.legendText}>{cat.name}</Text>
                   </View>
                 ))}
@@ -590,9 +639,9 @@ export default function AnalysisScreen() {
             <View style={styles.divider} />
 
             {sortedCategories.map((cat, idx) => {
-              const iconName = (icons as any)[cat.name.toLowerCase()] || 'receipt-outline';
-              const catColor = colors[idx % colors.length];
-              const lightColor = lightColors[idx % lightColors.length];
+              const iconName = getCatIcon(cat.name);
+              const catColor = getCatColor(cat.name, idx);
+              const lightColor = `${catColor}15`;
 
               return (
                 <View key={cat.name} style={styles.categoryItemRow}>
@@ -697,7 +746,23 @@ export default function AnalysisScreen() {
       }
 
       case 'Account Analysis': {
-        const maxAmt = Math.max(totalExpense, totalIncome, 100);
+        // Calculate dynamic expenses and income per account
+        const accountStats = dbAccounts.map(acc => {
+          const accTxs = monthTransactions.filter(t => t.accountName?.toLowerCase() === acc.name.toLowerCase());
+          const accExpense = accTxs.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
+          const accIncome = accTxs.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
+          return {
+            ...acc,
+            expense: accExpense,
+            income: accIncome
+          };
+        });
+
+        // Determine max amount for scale
+        const totalExpenses = accountStats.reduce((sum, a) => sum + a.expense, 0);
+        const totalIncomes = accountStats.reduce((sum, a) => sum + a.income, 0);
+        const maxAmt = Math.max(totalExpenses, totalIncomes, 100);
+
         const chartHeight = 160;
         const chartWidth = width - 72;
         const paddingLeft = 75;
@@ -705,7 +770,6 @@ export default function AnalysisScreen() {
         const paddingTop = 35;
         const paddingBottom = 30;
         const contentWidth = chartWidth - paddingLeft - paddingRight;
-        const centerX = paddingLeft + contentWidth / 2;
 
         const yLines = [
           { y: chartHeight - paddingBottom, val: 0 },
@@ -715,11 +779,8 @@ export default function AnalysisScreen() {
         ];
 
         // Bar dimensions
-        const barWidth = 28;
-        const gap = 8;
-
-        const expenseBarHeight = (totalExpense / maxAmt) * (chartHeight - paddingTop - paddingBottom);
-        const incomeBarHeight = (totalIncome / maxAmt) * (chartHeight - paddingTop - paddingBottom);
+        const barWidth = Math.max(6, Math.min(28, (contentWidth / Math.max(accountStats.length, 1)) / 3));
+        const gap = Math.max(2, barWidth / 4);
 
         return (
           <View style={styles.card}>
@@ -755,67 +816,93 @@ export default function AnalysisScreen() {
                   </React.Fragment>
                 ))}
 
-                {/* Bars */}
-                {/* Expense Bar */}
-                <Rect
-                  x={centerX - barWidth - gap / 2}
-                  y={chartHeight - paddingBottom - expenseBarHeight}
-                  width={barWidth}
-                  height={expenseBarHeight}
-                  fill="#FF6B6B"
-                  rx={3}
-                />
-                {/* Income Bar */}
-                <Rect
-                  x={centerX + gap / 2}
-                  y={chartHeight - paddingBottom - incomeBarHeight}
-                  width={barWidth}
-                  height={incomeBarHeight}
-                  fill="#0D8A63"
-                  rx={3}
-                />
+                {/* Draw side-by-side bars for each account */}
+                {accountStats.map((acc, idx) => {
+                  const segmentWidth = contentWidth / Math.max(accountStats.length, 1);
+                  const xOffset = paddingLeft + (idx * segmentWidth);
+                  const centerX = xOffset + segmentWidth / 2;
+
+                  const accExpenseBarHeight = (acc.expense / maxAmt) * (chartHeight - paddingTop - paddingBottom);
+                  const accIncomeBarHeight = (acc.income / maxAmt) * (chartHeight - paddingTop - paddingBottom);
+                  
+                  return (
+                    <G key={acc.id}>
+                      {/* Expense Bar */}
+                      <Rect
+                        x={centerX - barWidth - gap / 2}
+                        y={chartHeight - paddingBottom - accExpenseBarHeight}
+                        width={barWidth}
+                        height={accExpenseBarHeight}
+                        fill="#FF6B6B"
+                        rx={3}
+                      />
+                      {/* Income Bar */}
+                      <Rect
+                        x={centerX + gap / 2}
+                        y={chartHeight - paddingBottom - accIncomeBarHeight}
+                        width={barWidth}
+                        height={accIncomeBarHeight}
+                        fill="#0D8A63"
+                        rx={3}
+                      />
+                      {/* X Axis Label */}
+                      <SvgText
+                        x={centerX}
+                        y={chartHeight - paddingBottom + 16}
+                        fontSize="9"
+                        fill={themeColors.textSecondary}
+                        textAnchor="middle"
+                        fontWeight="bold"
+                      >
+                        {acc.name.substring(0, 8)}
+                      </SvgText>
+                    </G>
+                  );
+                })}
 
                 {/* Legend */}
-                <Rect x={chartWidth - 135} y={8} width={10} height={10} fill="#FF6B6B" rx={2} />
-                <SvgText x={chartWidth - 120} y={17} fontSize="10" fill={themeColors.textSecondary} fontWeight="600">Expense</SvgText>
-                <Rect x={chartWidth - 68} y={9} width="10" height="10" rx="2" fill="#FFA216" />
-                <SvgText x={chartWidth - 54} y={17} fontSize="10" fill={themeColors.textSecondary} fontWeight="600">Income</SvgText>
-
-                {/* X Axis Label */}
-                <SvgText
-                  x={centerX}
-                  y={chartHeight - paddingBottom + 16}
-                  fontSize="10"
-                  fill={themeColors.textSecondary}
-                  textAnchor="middle"
-                  fontWeight="bold"
-                >
-                  Savings
-                </SvgText>
+                <Rect x={chartWidth - 130} y={8} width={8} height={8} fill="#FF6B6B" rx={1.5} />
+                <SvgText x={chartWidth - 118} y={15} fontSize="9" fill={themeColors.textSecondary} fontWeight="600">Expense</SvgText>
+                <Rect x={chartWidth - 68} y={8} width="8" height="8" rx="1.5" fill="#0D8A63" />
+                <SvgText x={chartWidth - 56} y={15} fontSize="9" fill={themeColors.textSecondary} fontWeight="600">Income</SvgText>
               </Svg>
             </View>
 
-            {/* Savings Account Card */}
-            <TouchableOpacity
-              style={styles.accountRowClickable}
-              onPress={() => setIsAccountModalVisible(true)}
-            >
-              <View style={[styles.iconCircle, { backgroundColor: '#EAF7F3' }]}>
-                <Ionicons name="cash" size={20} color="#00684F" />
-              </View>
-              <View style={styles.accountCardContent}>
-                <Text style={styles.accountCardTitle}>Savings</Text>
-                <View style={styles.accountPeriodInfoRow}>
-                  <Text style={styles.accountPeriodLabel}>This period: </Text>
-                  <View style={styles.accountPeriodExpenseBox}>
-                    <Text style={styles.accountPeriodExpenseText}>-{formatCurrency(totalExpense)}</Text>
+            {/* Account Card Rows */}
+            {accountStats.map(acc => {
+              const iconInfo = ACCOUNT_ICONS[acc.type as keyof typeof ACCOUNT_ICONS] || {
+                icon: 'wallet-outline',
+                color: '#6B7B77',
+                bgColor: '#F4FAF8'
+              };
+
+              return (
+                <TouchableOpacity
+                  key={acc.id}
+                  style={styles.accountRowClickable}
+                  onPress={() => {
+                    setSelectedAccountForDetails(acc);
+                    setIsAccountModalVisible(true);
+                  }}
+                >
+                  <View style={[styles.iconCircle, { backgroundColor: iconInfo.bgColor }]}>
+                    <Ionicons name={iconInfo.icon as any} size={20} color={iconInfo.color} />
                   </View>
-                  <View style={styles.accountPeriodIncomeBox}>
-                    <Text style={styles.accountPeriodIncomeText}>+{formatCurrency(totalIncome)}</Text>
+                  <View style={styles.accountCardContent}>
+                    <Text style={[styles.accountCardTitle, { color: themeColors.text }]}>{acc.name}</Text>
+                    <View style={styles.accountPeriodInfoRow}>
+                      <Text style={[styles.accountPeriodLabel, { color: themeColors.textSecondary }]}>This period: </Text>
+                      <View style={styles.accountPeriodExpenseBox}>
+                        <Text style={styles.accountPeriodExpenseText}>-{formatCurrency(acc.expense)}</Text>
+                      </View>
+                      <View style={styles.accountPeriodIncomeBox}>
+                        <Text style={styles.accountPeriodIncomeText}>+{formatCurrency(acc.income)}</Text>
+                      </View>
+                    </View>
                   </View>
-                </View>
-              </View>
-            </TouchableOpacity>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         );
       }
@@ -827,6 +914,40 @@ export default function AnalysisScreen() {
 
   const selectedDayTransactions = selectedDay ? getDayTransactions(selectedDay) : [];
   const modalFilteredTransactions = selectedDayTransactions.filter(t => t.type === detailsTab);
+
+  // Account modal dynamic stats
+  const activeAccountName = selectedAccountForDetails?.name || '';
+  const accountTxs = activeAccountName
+    ? monthTransactions.filter(t => t.accountName?.toLowerCase() === activeAccountName.toLowerCase())
+    : [];
+
+  const accountPeriodExpense = accountTxs
+    .filter(t => t.type === 'expense')
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const accountPeriodIncome = accountTxs
+    .filter(t => t.type === 'income')
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const accountEndingBalance = selectedAccountForDetails?.balance || 0;
+  const accountStartingBalance = accountEndingBalance - accountPeriodIncome + accountPeriodExpense;
+
+  const accountTransfersIn = accountTxs
+    .filter(t => t.type === 'income' && t.category.toLowerCase() === 'transfer')
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const accountTransfersOut = accountTxs
+    .filter(t => t.type === 'expense' && t.category.toLowerCase() === 'transfer')
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  // Group transactions for the modal by date
+  const sortedAccountTxs = [...accountTxs].sort((a, b) => {
+    const timeA = new Date(a.date).getTime();
+    const timeB = new Date(b.date).getTime();
+    return accountSortOrder === 'new_to_old' ? timeB - timeA : timeA - timeB;
+  });
+
+  const accountGroupDates = Array.from(new Set(sortedAccountTxs.map(t => t.date)));
 
   return (
     <View style={styles.container}>
@@ -1039,15 +1160,15 @@ export default function AnalysisScreen() {
         <TouchableWithoutFeedback onPress={() => setIsAccountModalVisible(false)}>
           <View style={styles.accountModalOverlay}>
             <TouchableWithoutFeedback>
-              <View style={styles.accountModalContent}>
+              <View style={[styles.accountModalContent, { backgroundColor: themeColors.card }]}>
                 {/* Header */}
                 <View style={styles.accountModalHeader}>
                   <TouchableOpacity onPress={() => setIsAccountModalVisible(false)} style={styles.accountModalCloseBtn}>
-                    <Ionicons name="close" size={24} color="#6B7B77" />
+                    <Ionicons name="close" size={24} color={themeColors.textSecondary} />
                   </TouchableOpacity>
                   <View style={styles.accountModalHeaderTitleContainer}>
-                    <Text style={styles.accountModalTitle}>Account details</Text>
-                    <Text style={styles.accountModalSubtitle}>
+                    <Text style={[styles.accountModalTitle, { color: themeColors.text }]}>Account details</Text>
+                    <Text style={[styles.accountModalSubtitle, { color: themeColors.textSecondary }]}>
                       Time selected: {`${MONTHS[currentMonthIndex].substring(0, 3)} 01 - ${MONTHS[currentMonthIndex].substring(0, 3)} ${totalDays}`}
                     </Text>
                   </View>
@@ -1060,69 +1181,82 @@ export default function AnalysisScreen() {
                   showsVerticalScrollIndicator={false}
                 >
                   {/* Account row */}
-                  <View style={styles.accountDetailRow}>
-                    <View style={[styles.iconCircle, { backgroundColor: '#EAF7F3', marginRight: 12 }]}>
-                      <Ionicons name="cash" size={24} color="#00684F" />
-                    </View>
-                    <View>
-                      <Text style={styles.accountDetailRowTitle}>Savings</Text>
-                      <Text style={styles.accountDetailRowBalance}>
-                        Account balance: <Text style={{ color: '#0D8A63', fontWeight: '700' }}>{formatCurrency(300.00 + totalIncome - totalExpense)}</Text>
-                      </Text>
-                    </View>
-                  </View>
+                  {selectedAccountForDetails && (() => {
+                    const iconInfo = ACCOUNT_ICONS[selectedAccountForDetails.type as keyof typeof ACCOUNT_ICONS] || {
+                      icon: 'wallet-outline',
+                      color: '#6B7B77',
+                      bgColor: '#F4FAF8'
+                    };
+                    return (
+                      <View style={styles.accountDetailRow}>
+                        <View style={[styles.iconCircle, { backgroundColor: iconInfo.bgColor, marginRight: 12 }]}>
+                          <Ionicons name={iconInfo.icon as any} size={24} color={iconInfo.color} />
+                        </View>
+                        <View>
+                          <Text style={[styles.accountDetailRowTitle, { color: themeColors.text }]}>{selectedAccountForDetails.name}</Text>
+                          <Text style={[styles.accountDetailRowBalance, { color: themeColors.textSecondary }]}>
+                            Account balance: <Text style={{ color: '#0D8A63', fontWeight: '700' }}>{formatCurrency(accountEndingBalance)}</Text>
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })()}
 
                   {/* Summary Card */}
-                  <View style={styles.accountSummaryCard}>
-                    <Text style={styles.accountSummaryPeriodTitle}>
+                  <View style={[styles.accountSummaryCard, { backgroundColor: isDarkMode ? '#1e2d2a' : '#F4FAF8', borderColor: themeColors.border }]}>
+                    <Text style={[styles.accountSummaryPeriodTitle, { color: themeColors.text }]}>
                       {`${MONTHS[currentMonthIndex].substring(0, 3)} 01 - ${MONTHS[currentMonthIndex].substring(0, 3)} ${totalDays}`}
                     </Text>
-                    <Text style={styles.accountSummaryStartingBalance}>Starting balance {formatCurrency(300.00)}</Text>
+                    <Text style={[styles.accountSummaryStartingBalance, { color: themeColors.textSecondary }]}>Starting balance {formatCurrency(accountStartingBalance)}</Text>
 
                     <View style={styles.accountSummaryColumns}>
                       {/* Expense Column */}
                       <View style={styles.accountSummaryColumn}>
-                        <Text style={styles.accountSummaryColumnLabel}>Expense</Text>
-                        <Text style={[styles.accountSummaryColumnValue, { color: '#FF6B6B' }]}>-{formatCurrency(totalExpense)}</Text>
-                        <Text style={styles.accountSummaryColumnPercentage}>100.00%</Text>
-                        <Text style={styles.accountSummaryColumnSubtext}>of total expense in this period</Text>
+                        <Text style={[styles.accountSummaryColumnLabel, { color: themeColors.textSecondary }]}>Expense</Text>
+                        <Text style={[styles.accountSummaryColumnValue, { color: '#FF6B6B' }]}>-{formatCurrency(accountPeriodExpense)}</Text>
+                        <Text style={[styles.accountSummaryColumnPercentage, { color: themeColors.text }]}>
+                          {totalExpense > 0 ? ((accountPeriodExpense / totalExpense) * 100).toFixed(1) : '0.0'}%
+                        </Text>
+                        <Text style={[styles.accountSummaryColumnSubtext, { color: themeColors.textSecondary }]}>of total expense in this period</Text>
                       </View>
                       {/* Divider vertical line */}
-                      <View style={styles.accountSummaryVerticalDivider} />
+                      <View style={[styles.accountSummaryVerticalDivider, { backgroundColor: themeColors.border }]} />
                       {/* Income Column */}
                       <View style={styles.accountSummaryColumn}>
-                        <Text style={styles.accountSummaryColumnLabel}>Income</Text>
-                        <Text style={[styles.accountSummaryColumnValue, { color: '#0D8A63' }]}>+{formatCurrency(totalIncome)}</Text>
-                        <Text style={styles.accountSummaryColumnPercentage}>100.00%</Text>
-                        <Text style={styles.accountSummaryColumnSubtext}>of total income in this period</Text>
+                        <Text style={[styles.accountSummaryColumnLabel, { color: themeColors.textSecondary }]}>Income</Text>
+                        <Text style={[styles.accountSummaryColumnValue, { color: '#0D8A63' }]}>+{formatCurrency(accountPeriodIncome)}</Text>
+                        <Text style={[styles.accountSummaryColumnPercentage, { color: themeColors.text }]}>
+                          {totalIncome > 0 ? ((accountPeriodIncome / totalIncome) * 100).toFixed(1) : '0.0'}%
+                        </Text>
+                        <Text style={[styles.accountSummaryColumnSubtext, { color: themeColors.textSecondary }]}>of total income in this period</Text>
                       </View>
                     </View>
 
-                    <View style={styles.accountSummaryDivider} />
+                    <View style={[styles.accountSummaryDivider, { backgroundColor: themeColors.border }]} />
 
                     {/* Transfer info */}
                     <View style={styles.accountSummaryTransferRow}>
-                      <Text style={styles.accountSummaryTransferLabel}>Transfer into this account</Text>
-                      <Text style={[styles.accountSummaryTransferVal, { color: '#0D8A63' }]}>{formatCurrency(0.00)}</Text>
+                      <Text style={[styles.accountSummaryTransferLabel, { color: themeColors.textSecondary }]}>Transfer into this account</Text>
+                      <Text style={[styles.accountSummaryTransferVal, { color: '#0D8A63' }]}>{formatCurrency(accountTransfersIn)}</Text>
                     </View>
                     <View style={styles.accountSummaryTransferRow}>
-                      <Text style={styles.accountSummaryTransferLabel}>Transfer out to other accounts</Text>
-                      <Text style={[styles.accountSummaryTransferVal, { color: '#FF6B6B' }]}>-{formatCurrency(0.00)}</Text>
+                      <Text style={[styles.accountSummaryTransferLabel, { color: themeColors.textSecondary }]}>Transfer out to other accounts</Text>
+                      <Text style={[styles.accountSummaryTransferVal, { color: '#FF6B6B' }]}>-{formatCurrency(accountTransfersOut)}</Text>
                     </View>
 
-                    <View style={styles.accountSummaryDivider} />
+                    <View style={[styles.accountSummaryDivider, { backgroundColor: themeColors.border }]} />
 
                     {/* Ending Balance */}
                     <View style={styles.accountSummaryEndingRow}>
-                      <Text style={styles.accountSummaryEndingLabel}>Ending balance</Text>
-                      <Text style={[styles.accountSummaryEndingVal, { color: '#0D8A63' }]}>{formatCurrency(300.00 + totalIncome - totalExpense)}</Text>
+                      <Text style={[styles.accountSummaryEndingLabel, { color: themeColors.text }]}>Ending balance</Text>
+                      <Text style={[styles.accountSummaryEndingVal, { color: '#0D8A63' }]}>{formatCurrency(accountEndingBalance)}</Text>
                     </View>
                   </View>
 
                   {/* Records Header */}
                   <View style={styles.accountRecordsHeader}>
-                    <Text style={styles.accountRecordsHeaderTitle}>
-                      {`${MONTHS[currentMonthIndex].substring(0, 3)} 01 - ${MONTHS[currentMonthIndex].substring(0, 3)} ${totalDays}`} : {monthTransactions.length} records
+                    <Text style={[styles.accountRecordsHeaderTitle, { color: themeColors.text }]}>
+                      {`${MONTHS[currentMonthIndex].substring(0, 3)} 01 - ${MONTHS[currentMonthIndex].substring(0, 3)} ${totalDays}`} : {accountTxs.length} records
                     </Text>
                     <TouchableOpacity
                       style={styles.accountSortToggleBtn}
@@ -1137,62 +1271,60 @@ export default function AnalysisScreen() {
 
                   {/* Records List (Inside the single parent ScrollView) */}
                   <View style={styles.accountRecordsList}>
-                    {Array.from(new Set([...monthTransactions].sort((a, b) => {
-                      const timeA = new Date(a.date).getTime();
-                      const timeB = new Date(b.date).getTime();
-                      return accountSortOrder === 'new_to_old' ? timeB - timeA : timeA - timeB;
-                    }).map(t => t.date))).map(dateStr => {
-                      const dateTxs = monthTransactions.filter(t => t.date === dateStr);
-                      // Format group date
-                      const parts = dateStr.split('-');
-                      const y = parseInt(parts[0], 10);
-                      const m = parseInt(parts[1], 10) - 1;
-                      const d = parseInt(parts[2], 10);
-                      const dateObj = new Date(y, m, d);
-                      const month = MONTHS[m].substring(0, 3);
-                      const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-                      const weekday = daysOfWeek[dateObj.getDay()];
-                      const headerDate = `${month} ${parts[2]}, ${weekday}`;
+                    {accountTxs.length === 0 ? (
+                      <View style={{ paddingVertical: 24, alignItems: 'center' }}>
+                        <Text style={{ color: themeColors.textSecondary, fontSize: 13 }}>No records for this account in this period.</Text>
+                      </View>
+                    ) : (
+                      accountGroupDates.map(dateStr => {
+                        const dateTxs = sortedAccountTxs.filter(t => t.date === dateStr);
+                        // Format group date
+                        const parts = dateStr.split('-');
+                        const y = parseInt(parts[0], 10);
+                        const m = parseInt(parts[1], 10) - 1;
+                        const d = parseInt(parts[2], 10);
+                        const dateObj = new Date(y, m, d);
+                        const month = MONTHS[m].substring(0, 3);
+                        const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                        const weekday = daysOfWeek[dateObj.getDay()];
+                        const headerDate = `${month} ${parts[2]}, ${weekday}`;
 
-                      return (
-                        <View key={dateStr} style={styles.accountGroupContainer}>
-                          <Text style={styles.accountGroupDateText}>{headerDate}</Text>
-                          {dateTxs.map(tx => (
-                            <View key={tx.id} style={styles.accountRecordItem}>
-                              <View style={styles.accountRecordLeft}>
-                                <View style={styles.accountRecordIconBg}>
-                                  <Ionicons
-                                    name={
-                                      tx.category.toLowerCase() === 'food' ? 'fast-food' :
-                                        tx.category.toLowerCase() === 'rent' ? 'home' :
-                                          tx.category.toLowerCase() === 'transport' ? 'bus' :
-                                            tx.category.toLowerCase() === 'leisure' ? 'game-controller' :
-                                              tx.category.toLowerCase() === 'salary' ? 'cash' :
-                                                tx.category.toLowerCase() === 'freelance' ? 'laptop' :
-                                                  'card'
-                                    }
-                                    size={16}
-                                    color="#00684F"
-                                  />
+                        return (
+                          <View key={dateStr} style={styles.accountGroupContainer}>
+                            <Text style={[styles.accountGroupDateText, { color: themeColors.textSecondary }]}>{headerDate}</Text>
+                            {dateTxs.map(tx => {
+                              const iconName = tx.categoryIcon || getCatIcon(tx.category);
+                              const catColor = tx.categoryColor || '#6B7B77';
+                              return (
+                                <View key={tx.id} style={[styles.accountRecordItem, { borderBottomColor: themeColors.divider }]}>
+                                  <View style={styles.accountRecordLeft}>
+                                    <View style={[styles.accountRecordIconBg, { backgroundColor: `${catColor}15` }]}>
+                                      <Ionicons
+                                        name={iconName as any}
+                                        size={16}
+                                        color={catColor}
+                                      />
+                                    </View>
+                                    <View style={styles.accountRecordTextInfo}>
+                                      <Text style={[styles.accountRecordCategory, { color: themeColors.text }]}>{tx.category}</Text>
+                                      {tx.description ? (
+                                        <Text style={[styles.accountRecordDesc, { color: themeColors.textSecondary }]}>“{tx.description}”</Text>
+                                      ) : null}
+                                    </View>
+                                  </View>
+                                  <Text style={[
+                                    styles.accountRecordAmount,
+                                    { color: tx.type === 'income' ? '#0D8A63' : '#FF6B6B' }
+                                  ]}>
+                                    {tx.type === 'income' ? '+' : '-'}{formatCurrency(tx.amount)}
+                                  </Text>
                                 </View>
-                                <View style={styles.accountRecordTextInfo}>
-                                  <Text style={styles.accountRecordCategory}>{tx.category}</Text>
-                                  {tx.description ? (
-                                    <Text style={styles.accountRecordDesc}>“{tx.description}”</Text>
-                                  ) : null}
-                                </View>
-                              </View>
-                              <Text style={[
-                                styles.accountRecordAmount,
-                                { color: tx.type === 'income' ? '#0D8A63' : '#FF6B6B' }
-                              ]}>
-                                {tx.type === 'income' ? '+' : '-'}{formatCurrency(tx.amount)}
-                              </Text>
-                            </View>
-                          ))}
-                        </View>
-                      );
-                    })}
+                              );
+                            })}
+                          </View>
+                        );
+                      })
+                    )}
                   </View>
                 </ScrollView>
               </View>
