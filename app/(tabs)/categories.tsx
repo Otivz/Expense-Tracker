@@ -1,10 +1,15 @@
+import { categoryRepository } from '@/db/repositories/categoryRepository';
+import { useVault } from '@/context/vault-context';
+import { sendLocalNotification } from '@/utils/notifications';
+import { type Category } from '@/db/models/category';
 import { AccountsSummary } from '@/components/accounts-summary';
 import { Button } from '@/components/button';
 import { Header } from '@/components/header';
 import { useTheme } from '@/context/theme-context';
 import { useTransactions } from '@/hooks/useTransactions';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AddTransactionModal } from '@/components/add-transaction-modal';
 import {
   Alert,
@@ -18,32 +23,14 @@ import {
   View
 } from 'react-native';
 
-interface Category {
-  id: string;
-  name: string;
-  icon: string;
-  color: string;
-  type: 'expense' | 'income';
-}
+// Category model is loaded directly from the database schema.
 
-const DEFAULT_CATEGORIES: Category[] = [
-  { id: '1', name: 'Bills', icon: 'document-text', color: '#4D96FF', type: 'expense' },
-  { id: '2', name: 'Baby', icon: 'heart', color: '#FF8B94', type: 'expense' },
-  { id: '3', name: 'Beauty', icon: 'rose', color: '#FF6B6B', type: 'expense' },
-  { id: '4', name: 'Car', icon: 'car', color: '#9B51E0', type: 'expense' },
-  { id: '5', name: 'Clothing', icon: 'shirt', color: '#FFA216', type: 'expense' },
-  { id: '6', name: 'Food', icon: 'fast-food', color: '#FF6B6B', type: 'expense' },
-  { id: '7', name: 'Rent', icon: 'home', color: '#4D96FF', type: 'expense' },
-  { id: '8', name: 'Transport', icon: 'bus', color: '#6BCB77', type: 'expense' },
-  { id: '9', name: 'Leisure', icon: 'game-controller', color: '#FFA216', type: 'expense' },
-  { id: '10', name: 'Salary', icon: 'briefcase', color: '#0D8A63', type: 'income' },
-  { id: '11', name: 'Freelance', icon: 'laptop', color: '#9B51E0', type: 'income' },
-  { id: '12', name: 'Investments', icon: 'trending-up', color: '#2D9CDB', type: 'income' },
-];
 
 const AVAILABLE_ICONS = [
   'fast-food', 'home', 'bus', 'game-controller', 'briefcase', 'laptop', 'trending-up',
-  'document-text', 'heart', 'rose', 'car', 'shirt', 'basket', 'gift', 'medical', 'school'
+  'document-text', 'heart', 'rose', 'car', 'shirt', 'basket', 'gift', 'medical', 'school',
+  'cart', 'construct', 'airplane', 'subway', 'water', 'flame', 'tv', 'beer',
+  'dumbbell', 'scissors', 'book', 'wallet', 'cash', 'card', 'shield-checkmark', 'hammer'
 ];
 
 const AVAILABLE_COLORS = [
@@ -52,76 +39,94 @@ const AVAILABLE_COLORS = [
 
 export default function CategoriesScreen() {
   const { currentMonthIndex, transactions } = useTransactions();
-  const { colors } = useTheme();
-  const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
+  const { colors, isDarkMode } = useTheme();
+  const { currentAccount } = useVault();
+  const userId = currentAccount?.id || 'mock-user-id';
+
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'expense' | 'income'>('expense');
 
   // Modal State
   const [modalVisible, setModalVisible] = useState(false);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
-  const [categoryName, setCategoryName] = useState('');
+  const [categoryName, setCategoryName] = useState('Untitled');
   const [selectedIcon, setSelectedIcon] = useState('basket');
   const [selectedColor, setSelectedColor] = useState('#00684F');
   const [addModalVisible, setAddModalVisible] = useState(false);
 
+  const loadCategories = useCallback(async () => {
+    try {
+      setLoading(true);
+      const dbCats = await categoryRepository.getAll(userId);
+      setCategories(dbCats);
+    } catch (err) {
+      console.error('Failed to load categories:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadCategories();
+    }, [loadCategories])
+  );
+
   const incomeCategories = categories.filter(c => c.type === 'income');
   const expenseCategories = categories.filter(c => c.type === 'expense');
 
-  const monthString = (currentMonthIndex + 1).toString().padStart(2, '0');
-  const monthPrefix = `2026-${monthString}`;
-  const monthlyTransactions = transactions.filter(t => t.date.startsWith(monthPrefix));
-
-  const totalExpense = monthlyTransactions
-    .filter(t => t.type === 'expense')
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const totalIncome = monthlyTransactions
-    .filter(t => t.type === 'income')
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const allTimeExpense = transactions
-    .filter(t => t.type === 'expense')
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const allTimeIncome = transactions
-    .filter(t => t.type === 'income')
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const totalBalance = 14055.00 + allTimeIncome - allTimeExpense; // Use base reference balance of 14,055.00 from screenshot
-
-  const formatCurrency = (val: number) => {
-    return `₱${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const openAddCategoryModal = (type: 'expense' | 'income') => {
+    setEditingCategoryId(null);
+    setCategoryName('Untitled');
+    setSelectedIcon('basket');
+    setSelectedColor('#00684F');
+    setActiveTab(type);
+    setModalVisible(true);
   };
 
-  const handleAddCategory = () => {
-    if (!categoryName.trim()) {
+  const handleAddCategory = async () => {
+    const trimmedName = categoryName.trim();
+    if (!trimmedName) {
       Alert.alert('Invalid Name', 'Please enter a category name.');
       return;
     }
 
-    if (editingCategoryId) {
-      setCategories(prev => prev.map(c => c.id === editingCategoryId ? {
-        ...c,
-        name: categoryName.trim(),
-        icon: selectedIcon,
-        color: selectedColor,
-      } : c));
+    try {
+      if (editingCategoryId) {
+        await categoryRepository.update({
+          id: editingCategoryId,
+          user_id: userId,
+          name: trimmedName,
+          icon: selectedIcon,
+          color: selectedColor,
+          type: activeTab,
+        });
+      } else {
+        await categoryRepository.insert({
+          id: 'cat-usr-' + Math.random().toString(36).substring(2, 9),
+          user_id: userId,
+          name: trimmedName,
+          icon: selectedIcon,
+          color: selectedColor,
+          type: activeTab,
+        });
+      }
+      setModalVisible(false);
       setEditingCategoryId(null);
-    } else {
-      const newCategory: Category = {
-        id: Math.random().toString(36).substring(2, 9),
-        name: categoryName.trim(),
-        icon: selectedIcon,
-        color: selectedColor,
-        type: activeTab,
-      };
-      setCategories(prev => [...prev, newCategory]);
-    }
+      setCategoryName('Untitled');
+      setSelectedIcon('basket');
+      setSelectedColor('#00684F');
+      await loadCategories();
 
-    setModalVisible(false);
-    setCategoryName('');
-    setSelectedIcon('basket');
-    setSelectedColor('#00684F');
+      const message = editingCategoryId
+        ? `Category "${trimmedName}" was successfully updated.`
+        : `Category "${trimmedName}" was successfully created.`;
+      await sendLocalNotification('Category Saved 🏷️', message);
+    } catch (err) {
+      console.error('Failed to save category:', err);
+      Alert.alert('Error', 'An error occurred while saving the category. Make sure the name is unique.');
+    }
   };
 
   const handleDeleteCategory = (id: string, name: string) => {
@@ -133,8 +138,15 @@ export default function CategoriesScreen() {
         {
           text: 'Remove',
           style: 'destructive',
-          onPress: () => {
-            setCategories(prev => prev.filter(c => c.id !== id));
+          onPress: async () => {
+            try {
+              await categoryRepository.delete(id);
+              await loadCategories();
+              await sendLocalNotification('Category Removed 🗑️', `Category "${name}" was successfully removed.`);
+            } catch (err) {
+              console.error('Failed to delete category:', err);
+              Alert.alert('Error', 'Failed to remove category.');
+            }
           },
         },
       ]
@@ -142,33 +154,33 @@ export default function CategoriesScreen() {
   };
 
   const handleCategoryOptions = (id: string, name: string, icon: string, color: string, type: 'expense' | 'income') => {
+    const options = [
+      {
+        text: 'Edit',
+        onPress: () => {
+          setEditingCategoryId(id);
+          setCategoryName(name);
+          setSelectedIcon(icon);
+          setSelectedColor(color);
+          setActiveTab(type);
+          setModalVisible(true);
+        }
+      },
+      {
+        text: 'Delete',
+        style: 'destructive' as const,
+        onPress: () => handleDeleteCategory(id, name)
+      },
+      {
+        text: 'Cancel',
+        style: 'cancel' as const
+      }
+    ];
+
     Alert.alert(
       'Category Options',
       `What would you like to do with "${name}"?`,
-      [
-        {
-          text: 'Edit',
-          onPress: () => {
-            setEditingCategoryId(id);
-            setCategoryName(name);
-            setSelectedIcon(icon);
-            setSelectedColor(color);
-            setActiveTab(type);
-            setModalVisible(true);
-          }
-        },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => handleDeleteCategory(id, name)
-        },
-        {
-          text: 'Ignore',
-          onPress: () => {
-            Alert.alert('Ignored', `Category "${name}" ignored successfully.`);
-          }
-        }
-      ],
+      options,
       { cancelable: true }
     );
   };
@@ -191,14 +203,14 @@ export default function CategoriesScreen() {
           {incomeCategories.map(cat => (
             <View key={cat.id} style={[styles.categoryRow, { borderBottomColor: colors.divider }]}>
               <View style={styles.categoryRowLeft}>
-                <View style={[styles.iconCircleCircle, { backgroundColor: `${cat.color}15` }]}>
-                  <Ionicons name={cat.icon as any} size={20} color={cat.color} />
+                <View style={[styles.iconCircleCircle, { backgroundColor: `${cat.color || '#00684F'}15` }]}>
+                  <Ionicons name={(cat.icon || 'basket') as any} size={20} color={cat.color || '#00684F'} />
                 </View>
                 <Text style={[styles.categoryNameText, { color: colors.text }]}>{cat.name}</Text>
               </View>
               <TouchableOpacity
                 style={styles.actionBtn}
-                onPress={() => handleCategoryOptions(cat.id, cat.name, cat.icon, cat.color, cat.type)}
+                onPress={() => handleCategoryOptions(cat.id, cat.name, cat.icon || 'basket', cat.color || '#00684F', cat.type)}
               >
                 <Ionicons name="ellipsis-horizontal" size={18} color="#8E9E9A" />
               </TouchableOpacity>
@@ -208,10 +220,7 @@ export default function CategoriesScreen() {
           <Button
             title="ADD NEW CATEGORY"
             icon="add"
-            onPress={() => {
-              setActiveTab('income');
-              setModalVisible(true);
-            }}
+            onPress={() => openAddCategoryModal('income')}
             style={styles.addButtonMargin}
           />
         </View>
@@ -225,14 +234,14 @@ export default function CategoriesScreen() {
           {expenseCategories.map(cat => (
             <View key={cat.id} style={[styles.categoryRow, { borderBottomColor: colors.divider }]}>
               <View style={styles.categoryRowLeft}>
-                <View style={[styles.iconCircleCircle, { backgroundColor: `${cat.color}15` }]}>
-                  <Ionicons name={cat.icon as any} size={20} color={cat.color} />
+                <View style={[styles.iconCircleCircle, { backgroundColor: `${cat.color || '#00684F'}15` }]}>
+                  <Ionicons name={(cat.icon || 'basket') as any} size={20} color={cat.color || '#00684F'} />
                 </View>
                 <Text style={[styles.categoryNameText, { color: colors.text }]}>{cat.name}</Text>
               </View>
               <TouchableOpacity
                 style={styles.actionBtn}
-                onPress={() => handleCategoryOptions(cat.id, cat.name, cat.icon, cat.color, cat.type)}
+                onPress={() => handleCategoryOptions(cat.id, cat.name, cat.icon || 'basket', cat.color || '#00684F', cat.type)}
               >
                 <Ionicons name="ellipsis-horizontal" size={18} color="#8E9E9A" />
               </TouchableOpacity>
@@ -242,10 +251,7 @@ export default function CategoriesScreen() {
           <Button
             title="ADD NEW CATEGORY"
             icon="add"
-            onPress={() => {
-              setActiveTab('expense');
-              setModalVisible(true);
-            }}
+            onPress={() => openAddCategoryModal('expense')}
             style={styles.addButtonMargin}
           />
         </View>
@@ -275,11 +281,42 @@ export default function CategoriesScreen() {
         onRequestClose={() => setModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{editingCategoryId ? 'Edit Category' : 'Add Category'}</Text>
+          <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>{editingCategoryId ? 'Edit Category' : 'Add Category'}</Text>
 
+            {/* Type Switcher */}
+            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Type</Text>
+            <View style={[styles.typeToggleContainer, { borderColor: colors.border, backgroundColor: isDarkMode ? '#1e2d2a' : '#F4FAF8' }]}>
+              <TouchableOpacity
+                style={[
+                  styles.typeToggleBtn,
+                  activeTab === 'expense' && [styles.typeToggleBtnActive, { backgroundColor: '#FF6B6B' }]
+                ]}
+                onPress={() => setActiveTab('expense')}
+              >
+                <Text style={[
+                  styles.typeToggleText,
+                  activeTab === 'expense' ? styles.typeToggleTextActive : { color: colors.text }
+                ]}>Expense</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.typeToggleBtn,
+                  activeTab === 'income' && [styles.typeToggleBtnActive, { backgroundColor: '#0D8A63' }]
+                ]}
+                onPress={() => setActiveTab('income')}
+              >
+                <Text style={[
+                  styles.typeToggleText,
+                  activeTab === 'income' ? styles.typeToggleTextActive : { color: colors.text }
+                ]}>Income</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Category Name Input */}
+            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Name</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, { borderColor: colors.border, color: colors.text, backgroundColor: isDarkMode ? '#1e2d2a' : '#F4FAF8' }]}
               placeholder="Category Name"
               placeholderTextColor="#8E9E9A"
               value={categoryName}
@@ -287,29 +324,29 @@ export default function CategoriesScreen() {
             />
 
             {/* Icon Picker */}
-            <Text style={styles.sectionLabel}>Select Icon</Text>
+            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Select Icon</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pickerScroll}>
               <View style={styles.pickerRow}>
                 {AVAILABLE_ICONS.map(icon => (
                   <TouchableOpacity
                     key={icon}
-                    style={[styles.pickerIconBtn, selectedIcon === icon && styles.pickerIconBtnSelected]}
+                    style={[styles.pickerIconBtn, { borderColor: colors.border, backgroundColor: isDarkMode ? '#1e2d2a' : '#F4FAF8' }, selectedIcon === icon && [styles.pickerIconBtnSelected, { borderColor: colors.primary, backgroundColor: isDarkMode ? '#244d3e' : '#EAF4F1' }]]}
                     onPress={() => setSelectedIcon(icon)}
                   >
-                    <Ionicons name={icon as any} size={20} color={selectedIcon === icon ? '#00684F' : '#6B7B77'} />
+                    <Ionicons name={icon as any} size={20} color={selectedIcon === icon ? (isDarkMode ? '#03DAC6' : '#00684F') : '#6B7B77'} />
                   </TouchableOpacity>
                 ))}
               </View>
             </ScrollView>
 
             {/* Color Picker */}
-            <Text style={styles.sectionLabel}>Select Color</Text>
+            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Select Color</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pickerScroll}>
               <View style={styles.pickerRow}>
                 {AVAILABLE_COLORS.map(color => (
                   <TouchableOpacity
                     key={color}
-                    style={[styles.colorBtn, { backgroundColor: color }, selectedColor === color && styles.colorBtnSelected]}
+                    style={[styles.colorBtn, { backgroundColor: color }, selectedColor === color && [styles.colorBtnSelected, { borderColor: colors.text }]]}
                     onPress={() => setSelectedColor(color)}
                   />
                 ))}
@@ -318,19 +355,19 @@ export default function CategoriesScreen() {
 
             <View style={styles.modalActions}>
               <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnCancel]}
+                style={[styles.modalBtn, styles.modalBtnCancel, { backgroundColor: colors.border }]}
                 onPress={() => {
                   setModalVisible(false);
                   setEditingCategoryId(null);
-                  setCategoryName('');
+                  setCategoryName('Untitled');
                   setSelectedIcon('basket');
                   setSelectedColor('#00684F');
                 }}
               >
-                <Text style={styles.modalBtnCancelText}>Cancel</Text>
+                <Text style={[styles.modalBtnCancelText, { color: colors.textSecondary }]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalBtn, styles.modalBtnSave]}
+                style={[styles.modalBtn, styles.modalBtnSave, { backgroundColor: colors.primary }]}
                 onPress={handleAddCategory}
               >
                 <Text style={styles.modalBtnSaveText}>{editingCategoryId ? 'Save' : 'Add'}</Text>
@@ -519,5 +556,30 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '600',
     fontSize: 14,
+  },
+  typeToggleContainer: {
+    flexDirection: 'row',
+    borderWidth: 1,
+    borderColor: '#D7E5E0',
+    borderRadius: 8,
+    backgroundColor: '#F4FAF8',
+    marginBottom: 16,
+    overflow: 'hidden',
+  },
+  typeToggleBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  typeToggleBtnActive: {
+    backgroundColor: '#00684F',
+  },
+  typeToggleText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  typeToggleTextActive: {
+    color: '#FFFFFF',
   },
 });

@@ -91,8 +91,8 @@ export const VaultScreen: React.FC = () => {
     }
   }, [unlockWithBiometrics]);
 
-  const handleSelectAccount = useCallback((account: VaultAccount) => {
-    selectAccount(account);
+  const handleSelectAccount = useCallback(async (account: VaultAccount) => {
+    const needsSetup = await selectAccount(account);
     setViewState('loading');
 
     // Run loading animation (800ms - 1200ms)
@@ -110,13 +110,13 @@ export const VaultScreen: React.FC = () => {
         // Automatically attempt biometric unlock
         attemptBiometrics();
       } else {
-        setViewState(needsComboSetup ? 'setup' : 'combo');
+        setViewState(needsSetup ? 'setup' : 'combo');
       }
       setEnteredCombo([]);
       setDialNumber(0);
       dialRotation.value = 0;
     }, 1200);
-  }, [selectAccount, dialRotation, hasBiometricsSupport, needsComboSetup, attemptBiometrics]);
+  }, [selectAccount, dialRotation, hasBiometricsSupport, attemptBiometrics]);
 
 
 

@@ -1,8 +1,14 @@
 import { Header } from '@/components/header';
 import { useTheme } from '@/context/theme-context';
 import { useTransactions } from '@/hooks/useTransactions';
+import { budgetRepository } from '@/db/repositories/budgetRepository';
+import { categoryRepository } from '@/db/repositories/categoryRepository';
+import { type Category } from '@/db/models/category';
+import { useVault } from '@/context/vault-context';
+import { sendLocalNotification } from '@/utils/notifications';
+import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AddTransactionModal } from '@/components/add-transaction-modal';
 import { DisplayOptionsModal } from '@/components/display-options-modal';
 import {
@@ -28,14 +34,15 @@ interface Budget {
 }
 
 export default function BudgetsScreen() {
-  const { currentMonthIndex, setCurrentMonthIndex, transactions, addTransaction } = useTransactions();
+  const { currentMonthIndex, setCurrentMonthIndex, transactions } = useTransactions();
   const { colors } = useTheme();
+  const { currentAccount } = useVault();
+  const userId = currentAccount?.id || 'mock-user-id';
   const styles = getStyles(colors);
 
-  // Pre-load default budgets, including Bills like the reference design
-  const [budgets, setBudgets] = useState<Budget[]>([
-    { category: 'Bills', limit: 1500.00 }
-  ]);
+  const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [dbCategories, setDbCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(false);
 
   // Modal State
   const [modalVisible, setModalVisible] = useState(false);
@@ -48,20 +55,36 @@ export default function BudgetsScreen() {
   const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly' | '3months' | '6months' | 'yearly'>('monthly');
   const [showTotal, setShowTotal] = useState<'yes' | 'no'>('yes');
   const [carryOver, setCarryOver] = useState<'on' | 'off'>('on');
-  const [currentDate, setCurrentDate] = useState(new Date('2026-06-30'));
+  
+  const [currentDate, setCurrentDate] = useState(() => {
+    const d = new Date();
+    d.setMonth(currentMonthIndex);
+    return d;
+  });
 
-  // All potential categories
-  const ALL_CATEGORIES = [
-    { name: 'Bills', icon: 'document-text', color: '#4D96FF' },
-    { name: 'Baby', icon: 'heart-outline', color: '#FF8B94' },
-    { name: 'Beauty', icon: 'rose-outline', color: '#FF6B6B' },
-    { name: 'Car', icon: 'car-outline', color: '#9B51E0' },
-    { name: 'Clothing', icon: 'shirt-outline', color: '#FFA216' },
-    { name: 'Food', icon: 'fast-food-outline', color: '#FF6B6B' },
-    { name: 'Rent', icon: 'home-outline', color: '#4D96FF' },
-    { name: 'Transport', icon: 'bus-outline', color: '#6BCB77' },
-    { name: 'Leisure', icon: 'game-controller-outline', color: '#FFA216' },
-  ];
+  const loadBudgets = useCallback(async () => {
+    try {
+      setLoading(true);
+      const activeMonth = currentDate.getMonth() + 1; // 1-indexed
+      const activeYear = currentDate.getFullYear();
+      const [dbBudgets, cats] = await Promise.all([
+        budgetRepository.getAll(userId, activeMonth, activeYear),
+        categoryRepository.getAll(userId)
+      ]);
+      setBudgets(dbBudgets);
+      setDbCategories(cats);
+    } catch (err) {
+      console.error('Failed to load budgets from database:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId, currentDate]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadBudgets();
+    }, [loadBudgets])
+  );
 
   const getSelectorText = () => {
     const year = currentDate.getFullYear();
@@ -121,6 +144,7 @@ export default function BudgetsScreen() {
       newDate.setFullYear(newDate.getFullYear() - 1);
     }
     setCurrentDate(newDate);
+    setCurrentMonthIndex(newDate.getMonth());
   };
 
   const handleNextDate = () => {
@@ -139,6 +163,7 @@ export default function BudgetsScreen() {
       newDate.setFullYear(newDate.getFullYear() + 1);
     }
     setCurrentDate(newDate);
+    setCurrentMonthIndex(newDate.getMonth());
   };
 
   // Get spent amount from actual transactions for the currently selected date range
@@ -202,9 +227,11 @@ export default function BudgetsScreen() {
 
   // Split categories into budgeted and not budgeted
   const budgetedCategories = budgets;
-  const unbudgetedCategories = ALL_CATEGORIES.filter(
-    cat => !budgetedCategories.some(b => b.category.toLowerCase() === cat.name.toLowerCase())
-  );
+  const unbudgetedCategories = dbCategories
+    .filter(c => c.type === 'expense')
+    .filter(
+      cat => !budgetedCategories.some(b => b.category.toLowerCase() === cat.name.toLowerCase())
+    );
 
   // Totals calculations
   const totalBudget = budgetedCategories.reduce((sum, b) => sum + b.limit, 0);
@@ -217,19 +244,25 @@ export default function BudgetsScreen() {
     setModalVisible(true);
   };
 
-  const handleSaveBudget = () => {
+  const handleSaveBudget = async () => {
     const parsedLimit = parseFloat(limitInput);
     if (isNaN(parsedLimit) || parsedLimit <= 0) {
       Alert.alert('Invalid Limit', 'Please enter a valid positive number.');
       return;
     }
 
-    setBudgets(prev => {
-      const filtered = prev.filter(b => b.category.toLowerCase() !== selectedCategory.toLowerCase());
-      return [...filtered, { category: selectedCategory, limit: parsedLimit }];
-    });
-    setModalVisible(false);
-    setLimitInput('');
+    try {
+      const activeMonth = currentDate.getMonth() + 1; // 1-indexed
+      const activeYear = currentDate.getFullYear();
+      await budgetRepository.upsert(userId, selectedCategory, parsedLimit, activeMonth, activeYear);
+      setModalVisible(false);
+      setLimitInput('');
+      await loadBudgets();
+      await sendLocalNotification('Budget Saved 🎯', `Budget of ₱${parsedLimit.toFixed(2)} was saved for "${selectedCategory}".`);
+    } catch (err) {
+      console.error('Failed to save budget:', err);
+      Alert.alert('Error', 'An error occurred while saving the budget. Please make sure the category exists.');
+    }
   };
 
   const handleDeleteBudget = (category: string) => {
@@ -241,19 +274,52 @@ export default function BudgetsScreen() {
         {
           text: 'Remove',
           style: 'destructive',
-          onPress: () => {
-            setBudgets(prev => prev.filter(b => b.category.toLowerCase() !== category.toLowerCase()));
+          onPress: async () => {
+            try {
+              const activeMonth = currentDate.getMonth() + 1; // 1-indexed
+              const activeYear = currentDate.getFullYear();
+              await budgetRepository.delete(userId, category, activeMonth, activeYear);
+              await loadBudgets();
+              await sendLocalNotification('Budget Removed 🗑️', `Budget for "${category}" was removed.`);
+            } catch (err) {
+              console.error('Failed to delete budget:', err);
+              Alert.alert('Error', 'Failed to remove budget.');
+            }
           }
         }
       ]
     );
   };
 
+  const handleBudgetOptions = (category: string) => {
+    Alert.alert(
+      'Budget Options',
+      `What would you like to do with the budget for "${category}"?`,
+      [
+        {
+          text: 'Change limit',
+          onPress: () => openSetBudgetModal(category)
+        },
+        {
+          text: 'Remove budget',
+          style: 'destructive',
+          onPress: () => handleDeleteBudget(category)
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        }
+      ],
+      { cancelable: true }
+    );
+  };
+
   const getCategoryDetails = (name: string) => {
-    return ALL_CATEGORIES.find(c => c.name.toLowerCase() === name.toLowerCase()) || {
-      name,
-      icon: 'receipt-outline',
-      color: '#6B7B77'
+    const cat = dbCategories.find(c => c.name.toLowerCase() === name.toLowerCase());
+    return {
+      name: cat?.name || name,
+      icon: cat?.icon || 'receipt',
+      color: cat?.color || '#6B7B77'
     };
   };
 
@@ -335,7 +401,7 @@ export default function BudgetsScreen() {
                     </View>
                   </View>
                   <TouchableOpacity
-                    onPress={() => handleDeleteBudget(budget.category)}
+                    onPress={() => handleBudgetOptions(budget.category)}
                     style={styles.moreButton}
                   >
                     <Ionicons name="ellipsis-horizontal" size={20} color="#8E9E9A" />

@@ -1,22 +1,9 @@
-import { createClient } from '@supabase/supabase-js';
+import { userRepository } from '@/db/repositories/userRepository';
+import { sha256 } from '@/utils/hash';
 
-// Get env variables
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
-
-export const isSupabaseConfigured = 
-  supabaseUrl.trim().length > 0 && 
-  supabaseUrl.startsWith('https://') &&
-  supabaseAnonKey.trim().length > 0;
-
-// Initialize Supabase Client if configured
-export const supabase = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        persistSession: false, // We will handle persistence manually with SecureStore
-      },
-    })
-  : null;
+// Force database authentication (bypassing Supabase client completely)
+export const isSupabaseConfigured = false;
+export const supabase: any = null;
 
 // Standard interface for user details returned from authentication
 export interface AuthUser {
@@ -26,101 +13,86 @@ export interface AuthUser {
 }
 
 /**
- * Sign in helper with graceful mock fallback
+ * Sign in helper using local SQLite database
  */
 export async function signInWithEmail(email: string, password: string): Promise<AuthUser> {
   const cleanEmail = email.trim().toLowerCase();
   
-  if (isSupabaseConfigured && supabase) {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: cleanEmail,
-      password,
-    });
-    if (error) throw error;
-    if (!data.user) throw new Error('Failed to retrieve user details.');
-    
-    return {
-      id: data.user.id,
-      email: data.user.email || cleanEmail,
-      name: data.user.user_metadata?.name || cleanEmail.split('@')[0],
-    };
-  } else {
-    // Simulated mock authentication for UI demo purposes
-    await new Promise((resolve) => setTimeout(resolve, 800)); // Simulate network latency
-    
-    if (password.length < 6) {
-      throw new Error('Password must be at least 6 characters.');
-    }
-    
-    // In mock mode, we derive a unique ID from the email
-    const id = `mock-uid-${Buffer.from(cleanEmail).toString('base64').substring(0, 16)}`;
-    const name = cleanEmail.split('@')[0].replace(/[^a-zA-Z]/g, ' ')
-      .replace(/\b\w/g, c => c.toUpperCase());
-      
-    return {
-      id,
-      email: cleanEmail,
-      name: name || 'User',
-    };
+  // Simulate minor UI latency
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  
+  if (password.length < 6) {
+    throw new Error('Password must be at least 6 characters.');
   }
+  
+  // Fetch user from local SQLite
+  const user = await userRepository.getByEmail(cleanEmail);
+  if (!user) {
+    throw new Error('No account found with this email. Please sign up first.');
+  }
+  
+  // Verify password hash
+  const hashedPassword = sha256(password);
+  if (user.password !== hashedPassword) {
+    throw new Error('Incorrect password. Please try again.');
+  }
+  
+  console.log('User signed in locally via SQLite:', user.id);
+  
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+  };
 }
 
 /**
- * Sign up helper with graceful mock fallback
+ * Sign up helper using local SQLite database
  */
 export async function signUpWithEmail(email: string, password: string, name: string): Promise<AuthUser> {
   const cleanEmail = email.trim().toLowerCase();
   
-  if (isSupabaseConfigured && supabase) {
-    const { data, error } = await supabase.auth.signUp({
-      email: cleanEmail,
-      password,
-      options: {
-        data: {
-          name: name.trim(),
-        },
-      },
-    });
-    if (error) throw error;
-    if (!data.user) throw new Error('Failed to create account.');
-    
-    return {
-      id: data.user.id,
-      email: data.user.email || cleanEmail,
-      name: name.trim(),
-    };
-  } else {
-    // Simulated mock authentication for UI demo purposes
-    await new Promise((resolve) => setTimeout(resolve, 800)); // Simulate network latency
-    
-    if (password.length < 6) {
-      throw new Error('Password must be at least 6 characters.');
-    }
-    if (!name.trim()) {
-      throw new Error('Name is required.');
-    }
-    
-    const id = `mock-uid-${Buffer.from(cleanEmail).toString('base64').substring(0, 16)}`;
-    
-    return {
-      id,
-      email: cleanEmail,
-      name: name.trim(),
-    };
+  // Simulate minor UI latency
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  
+  if (password.length < 6) {
+    throw new Error('Password must be at least 6 characters.');
   }
+  if (!name.trim()) {
+    throw new Error('Name is required.');
+  }
+  
+  // Check if account already exists
+  const existingUser = await userRepository.getByEmail(cleanEmail);
+  if (existingUser) {
+    throw new Error('An account with this email already exists.');
+  }
+  
+  // Generate deterministic/unique local user ID
+  const id = `usr-${Math.random().toString(36).substring(2, 9)}`;
+  const hashedPassword = sha256(password);
+  
+  await userRepository.insert({
+    id,
+    name: name.trim(),
+    email: cleanEmail,
+    password: hashedPassword,
+    vault_password: undefined
+  });
+  
+  console.log('New user created locally in SQLite:', id);
+  
+  return {
+    id,
+    email: cleanEmail,
+    name: name.trim(),
+  };
 }
 
 /**
- * Send password reset email
+ * Send password reset email (Mocked locally)
  */
 export async function sendPasswordResetEmail(email: string): Promise<void> {
-  const cleanEmail = email.trim().toLowerCase();
-  
-  if (isSupabaseConfigured && supabase) {
-    const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
-    if (error) throw error;
-  } else {
-    // Simulated latency
-    await new Promise((resolve) => setTimeout(resolve, 800));
-  }
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  console.log(`Password reset requested for local user: ${email}`);
 }

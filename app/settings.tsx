@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -10,13 +10,19 @@ import {
   Platform,
   Alert,
   Linking,
+  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useSidebar } from '@/context/sidebar-context';
 import { useTheme } from '@/context/theme-context';
+import * as SecureStore from 'expo-secure-store';
+import {
+  scheduleDailyReminder,
+  cancelDailyReminder,
+  requestNotificationPermissions,
+} from '@/utils/notifications';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -24,6 +30,155 @@ export default function SettingsScreen() {
   const { isDarkMode, colors, toggleTheme } = useTheme();
   const [passcodeEnabled, setPasscodeEnabled] = useState(false);
   const [dailyReminder, setDailyReminder] = useState(false);
+  const [reminderHour, setReminderHour] = useState(20); // default 8 PM
+  const [reminderMinute, setReminderMinute] = useState(0);
+
+  // Time picker temporary states
+  const [isTimePickerVisible, setIsTimePickerVisible] = useState(false);
+  const [tempHour, setTempHour] = useState(8);
+  const [tempMinute, setTempMinute] = useState(0);
+  const [tempPeriod, setTempPeriod] = useState<'AM' | 'PM'>('PM');
+
+  const REMINDER_ENABLED_KEY = 'cvault_reminder_enabled';
+  const REMINDER_TIME_KEY = 'cvault_reminder_time';
+
+  const getSetting = async (key: string): Promise<string | null> => {
+    try {
+      if (Platform.OS === 'web') {
+        return localStorage.getItem(key);
+      }
+      return await SecureStore.getItemAsync(key);
+    } catch (e) {
+      console.error(`Error reading setting ${key}:`, e);
+      return null;
+    }
+  };
+
+  const setSetting = async (key: string, value: string): Promise<void> => {
+    try {
+      if (Platform.OS === 'web') {
+        localStorage.setItem(key, value);
+        return;
+      }
+      await SecureStore.setItemAsync(key, value);
+    } catch (e) {
+      console.error(`Error writing setting ${key}:`, e);
+    }
+  };
+
+  // Load settings on mount
+  useEffect(() => {
+    const loadSettings = async () => {
+      const enabledVal = await getSetting(REMINDER_ENABLED_KEY);
+      const timeVal = await getSetting(REMINDER_TIME_KEY);
+
+      if (enabledVal !== null) {
+        setDailyReminder(enabledVal === 'true');
+      }
+      if (timeVal !== null) {
+        try {
+          const { hour, minute } = JSON.parse(timeVal);
+          setReminderHour(hour);
+          setReminderMinute(minute);
+        } catch (e) {
+          console.error('Failed to parse reminder time', e);
+        }
+      }
+    };
+    loadSettings();
+  }, []);
+
+  const handleToggleReminder = async (value: boolean) => {
+    if (value) {
+      const granted = await requestNotificationPermissions();
+      if (granted) {
+        setDailyReminder(true);
+        await setSetting(REMINDER_ENABLED_KEY, 'true');
+        await scheduleDailyReminder(reminderHour, reminderMinute);
+        Alert.alert(
+          'Reminder Enabled ⏰',
+          `You will receive a daily reminder at ${formatTime(reminderHour, reminderMinute)}.`
+        );
+      } else {
+        setDailyReminder(false);
+        await setSetting(REMINDER_ENABLED_KEY, 'false');
+        Alert.alert(
+          'Permission Required',
+          'To receive reminders, please enable notification permissions in your system settings.'
+        );
+      }
+    } else {
+      setDailyReminder(false);
+      await setSetting(REMINDER_ENABLED_KEY, 'false');
+      await cancelDailyReminder();
+    }
+  };
+
+  const formatTime = (hour: number, minute: number): string => {
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+    const displayMinute = minute.toString().padStart(2, '0');
+    return `${displayHour}:${displayMinute} ${ampm}`;
+  };
+
+  const openTimePicker = () => {
+    const period = reminderHour >= 12 ? 'PM' : 'AM';
+    const displayHour = reminderHour % 12 === 0 ? 12 : reminderHour % 12;
+    
+    setTempHour(displayHour);
+    setTempMinute(reminderMinute);
+    setTempPeriod(period);
+    setIsTimePickerVisible(true);
+  };
+
+  const saveTimePicker = async () => {
+    let hour24 = tempHour % 12;
+    if (tempPeriod === 'PM') {
+      hour24 += 12;
+    }
+
+    setReminderHour(hour24);
+    setReminderMinute(tempMinute);
+    setIsTimePickerVisible(false);
+
+    await setSetting(REMINDER_TIME_KEY, JSON.stringify({ hour: hour24, minute: tempMinute }));
+
+    if (dailyReminder) {
+      await scheduleDailyReminder(hour24, tempMinute);
+      Alert.alert(
+        'Reminder Updated ⏰',
+        `Daily reminder time has been set to ${formatTime(hour24, tempMinute)}.`
+      );
+    } else {
+      Alert.alert(
+        'Time Saved',
+        `Reminder time is set to ${formatTime(hour24, tempMinute)}. Turn on "Reminder Everyday" to activate it.`,
+        [
+          { text: 'Later', style: 'cancel' },
+          {
+            text: 'Turn On Now',
+            onPress: () => handleToggleReminder(true),
+          },
+        ]
+      );
+    }
+  };
+
+  const incrementTempHour = () => {
+    setTempHour(prev => (prev === 12 ? 1 : prev + 1));
+  };
+
+  const decrementTempHour = () => {
+    setTempHour(prev => (prev === 1 ? 12 : prev - 1));
+  };
+
+  const incrementTempMinute = () => {
+    setTempMinute(prev => (prev === 59 ? 0 : prev + 1));
+  };
+
+  const decrementTempMinute = () => {
+    setTempMinute(prev => (prev === 0 ? 59 : prev - 1));
+  };
 
   const handleEmail = () => {
     Linking.openURL('mailto:emmanuelvitocruz@gmail.com').catch(() => {
@@ -130,29 +285,38 @@ export default function SettingsScreen() {
                 </View>
                 <View>
                   <Text style={[styles.rowTitle, { color: colors.text }]}>Reminder Everyday</Text>
-                  <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>Daily log notifications</Text>
+                  <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
+                    {dailyReminder ? `Active at ${formatTime(reminderHour, reminderMinute)}` : 'Daily log notifications'}
+                  </Text>
                 </View>
               </View>
               <Switch
                 value={dailyReminder}
-                onValueChange={setDailyReminder}
+                onValueChange={handleToggleReminder}
                 trackColor={{ false: colors.divider, true: '#A0D3C7' }}
                 thumbColor={dailyReminder ? colors.primary : '#CFD8DC'}
               />
             </View>
             <View style={[styles.divider, { backgroundColor: colors.divider }]} />
 
-            <TouchableOpacity style={styles.row} onPress={() => Alert.alert('Notification Settings', 'Configure native alert timings.')}>
+            <TouchableOpacity style={styles.row} onPress={openTimePicker} activeOpacity={0.7}>
               <View style={styles.rowLeft}>
                 <View style={[styles.iconCircle, { backgroundColor: colors.primaryLight }]}>
-                  <Ionicons name="notifications" size={20} color={colors.primary} />
+                  <Ionicons name="time" size={20} color={colors.primary} />
                 </View>
                 <View>
-                  <Text style={[styles.rowTitle, { color: colors.text }]}>Notification Settings</Text>
-                  <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>Alert sounds and badge configs</Text>
+                  <Text style={[styles.rowTitle, { color: colors.text }]}>Reminder Time</Text>
+                  <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
+                    Set when you want to be reminded
+                  </Text>
                 </View>
               </View>
-              <Ionicons name="chevron-forward" size={16} color="#B0BEC5" />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: colors.primary }}>
+                  {formatTime(reminderHour, reminderMinute)}
+                </Text>
+                <Ionicons name="chevron-forward" size={16} color="#B0BEC5" />
+              </View>
             </TouchableOpacity>
           </View>
         </View>
@@ -200,6 +364,104 @@ export default function SettingsScreen() {
         </View>
 
       </ScrollView>
+
+      {/* Custom Time Picker Modal */}
+      <Modal
+        visible={isTimePickerVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setIsTimePickerVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContainer, { backgroundColor: colors.card }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Select Reminder Time</Text>
+            
+            <View style={styles.pickerContainer}>
+              {/* Hour Selector */}
+              <View style={styles.pickerColumn}>
+                <TouchableOpacity onPress={incrementTempHour} style={[styles.pickerArrowButton, { backgroundColor: colors.primaryLight }]}>
+                  <Ionicons name="chevron-up" size={24} color={colors.primary} />
+                </TouchableOpacity>
+                <View style={[styles.pickerValueBox, { backgroundColor: colors.background }]}>
+                  <Text style={[styles.pickerValueText, { color: colors.text }]}>
+                    {tempHour.toString().padStart(2, '0')}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={decrementTempHour} style={[styles.pickerArrowButton, { backgroundColor: colors.primaryLight }]}>
+                  <Ionicons name="chevron-down" size={24} color={colors.primary} />
+                </TouchableOpacity>
+                <Text style={[styles.pickerLabelText, { color: colors.textSecondary }]}>Hour</Text>
+              </View>
+
+              <Text style={[styles.pickerSeparator, { color: colors.text }]}>:</Text>
+
+              {/* Minute Selector */}
+              <View style={styles.pickerColumn}>
+                <TouchableOpacity onPress={incrementTempMinute} style={[styles.pickerArrowButton, { backgroundColor: colors.primaryLight }]}>
+                  <Ionicons name="chevron-up" size={24} color={colors.primary} />
+                </TouchableOpacity>
+                <View style={[styles.pickerValueBox, { backgroundColor: colors.background }]}>
+                  <Text style={[styles.pickerValueText, { color: colors.text }]}>
+                    {tempMinute.toString().padStart(2, '0')}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={decrementTempMinute} style={[styles.pickerArrowButton, { backgroundColor: colors.primaryLight }]}>
+                  <Ionicons name="chevron-down" size={24} color={colors.primary} />
+                </TouchableOpacity>
+                <Text style={[styles.pickerLabelText, { color: colors.textSecondary }]}>Minute</Text>
+              </View>
+
+              {/* AM/PM Selector */}
+              <View style={styles.periodColumn}>
+                <TouchableOpacity
+                  onPress={() => setTempPeriod('AM')}
+                  style={[
+                    styles.periodButton,
+                    tempPeriod === 'AM' && { backgroundColor: colors.primary, borderColor: colors.primary }
+                  ]}
+                >
+                  <Text style={[
+                    styles.periodButtonText,
+                    tempPeriod === 'AM' ? { color: '#FFFFFF', fontWeight: 'bold' } : { color: colors.textSecondary }
+                  ]}>
+                    AM
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setTempPeriod('PM')}
+                  style={[
+                    styles.periodButton,
+                    tempPeriod === 'PM' && { backgroundColor: colors.primary, borderColor: colors.primary }
+                  ]}
+                >
+                  <Text style={[
+                    styles.periodButtonText,
+                    tempPeriod === 'PM' ? { color: '#FFFFFF', fontWeight: 'bold' } : { color: colors.textSecondary }
+                  ]}>
+                    PM
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Modal Buttons */}
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                onPress={() => setIsTimePickerVisible(false)}
+                style={[styles.modalButton, styles.cancelButton, { borderColor: colors.divider }]}
+              >
+                <Text style={[styles.cancelButtonText, { color: colors.textSecondary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={saveTimePicker}
+                style={[styles.modalButton, styles.saveButton, { backgroundColor: colors.primary }]}
+              >
+                <Text style={styles.saveButtonText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -343,5 +605,115 @@ const styles = StyleSheet.create({
   versionText: {
     fontSize: 11,
     color: '#B0BEC5',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    width: '85%',
+    maxWidth: 320,
+    borderRadius: 24,
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 5,
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 20,
+  },
+  pickerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 24,
+  },
+  pickerColumn: {
+    alignItems: 'center',
+    width: 60,
+  },
+  pickerArrowButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pickerValueBox: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
+  pickerValueText: {
+    fontSize: 22,
+    fontWeight: 'bold',
+  },
+  pickerLabelText: {
+    fontSize: 10,
+    marginTop: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  pickerSeparator: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginHorizontal: 4,
+    marginTop: -16,
+  },
+  periodColumn: {
+    justifyContent: 'center',
+    gap: 6,
+    marginLeft: 8,
+  },
+  periodButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ECEFF1',
+    alignItems: 'center',
+    width: 56,
+  },
+  periodButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  modalButton: {
+    flex: 1,
+    height: 46,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cancelButton: {
+    borderWidth: 1,
+  },
+  cancelButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  saveButton: {
+    elevation: 1,
+  },
+  saveButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });

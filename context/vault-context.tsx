@@ -1,9 +1,10 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Platform } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
-import * as LocalAuthentication from 'expo-local-authentication';
+import { userRepository } from '@/db/repositories/userRepository';
 import { sha256 } from '@/utils/hash';
 import * as Haptics from 'expo-haptics';
+import * as LocalAuthentication from 'expo-local-authentication';
+import * as SecureStore from 'expo-secure-store';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 
 export interface VaultAccount {
   id: string;
@@ -23,7 +24,7 @@ interface VaultContextType {
   lockoutRemaining: number;
   hasBiometricsSupport: boolean;
   biometryType: string;
-  selectAccount: (account: VaultAccount | null) => void;
+  selectAccount: (account: VaultAccount | null) => Promise<boolean>;
   unlockVault: (combination: number[]) => Promise<boolean>;
   verifyCombinationStep: (stepIndex: number, partialCombination: number[]) => Promise<boolean>;
   saveVaultCombination: (combination: number[]) => Promise<void>;
@@ -149,11 +150,11 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-  const selectAccount = async (account: VaultAccount | null) => {
+  const selectAccount = async (account: VaultAccount | null): Promise<boolean> => {
     setCurrentAccount(account);
     setFailedAttempts(0);
     setIsLockedOut(false);
-    
+
     if (account) {
       // Auto-set combination 10-20-30-40 for the demo account (ensure it is initialized every selection/redirect)
       if (account.id === 'demo-user-id') {
@@ -170,20 +171,19 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       // Check if this account has a combination set up
       const comboHash = await getItemSecure(`${COMBINATION_PREFIX}${account.id}`);
-      if (!comboHash) {
-        setNeedsComboSetup(true);
-      } else {
-        setNeedsComboSetup(false);
-      }
+      const needsSetup = !comboHash;
+      setNeedsComboSetup(needsSetup);
+      return needsSetup;
     } else {
       setNeedsComboSetup(false);
+      return false;
     }
   };
 
   const addAccount = async (user: { id: string; email: string; name: string }): Promise<VaultAccount> => {
     // Check if account already exists
     const existing = accounts.find((a) => a.id === user.id || a.email.toLowerCase() === user.email.toLowerCase());
-    
+
     const nowStr = new Date().toISOString();
     let updatedAccount: VaultAccount;
 
@@ -216,9 +216,24 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     }
 
+    // Ensure user exists in SQLite database
+    try {
+      const localUser = await userRepository.getById(user.id);
+      if (!localUser) {
+        await userRepository.insert({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+        });
+        console.log('User synced to SQLite database:', user.id);
+      }
+    } catch (dbErr) {
+      console.error('Failed to sync user to SQLite database:', dbErr);
+    }
+
     const filteredList = accounts.filter((a) => a.id !== updatedAccount.id);
     const newList = [updatedAccount, ...filteredList];
-    
+
     await setItemSecure(ACCOUNTS_LIST_KEY, JSON.stringify(newList));
     setAccounts(newList);
     setCurrentAccount(updatedAccount);
@@ -231,6 +246,14 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const deleteAccount = async (accountId: string) => {
+    // Sync user deletion to SQLite database
+    try {
+      await userRepository.delete(accountId);
+      console.log('User deleted from SQLite database:', accountId);
+    } catch (dbErr) {
+      console.error('Failed to delete user from SQLite database:', dbErr);
+    }
+
     const newList = accounts.filter((a) => a.id !== accountId);
     await setItemSecure(ACCOUNTS_LIST_KEY, JSON.stringify(newList));
     await deleteItemSecure(`${COMBINATION_PREFIX}${accountId}`);
@@ -257,29 +280,37 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const saveVaultCombination = async (combination: number[]) => {
     if (!currentAccount) throw new Error('No account selected.');
-    
+
     // Hash the combination array
     const comboString = combination.join(',');
     const hash = sha256(comboString);
-    
+
     await setItemSecure(`${COMBINATION_PREFIX}${currentAccount.id}`, hash);
-    
+
     // Save progressive hashes for step-by-step validation
     for (let i = 1; i <= 4; i++) {
       const subCombo = combination.slice(0, i).join(',');
       const stepHash = sha256(subCombo);
       await setItemSecure(`${COMBINATION_PREFIX}${currentAccount.id}_step_${i}`, stepHash);
     }
-    
+
+    // Sync combination hash to SQLite users table
+    try {
+      await userRepository.updateVaultPassword(currentAccount.id, hash);
+      console.log('Vault combination hash saved to SQLite for user:', currentAccount.id);
+    } catch (dbErr) {
+      console.error('Failed to update vault combination in SQLite:', dbErr);
+    }
+
     setNeedsComboSetup(false);
   };
 
   const verifyCombinationStep = async (stepIndex: number, partialCombination: number[]): Promise<boolean> => {
     if (!currentAccount) return false;
-    
+
     const partialString = partialCombination.join(',');
     const hash = sha256(partialString);
-    
+
     const storedStepHash = await getItemSecure(`${COMBINATION_PREFIX}${currentAccount.id}_step_${stepIndex}`);
     return storedStepHash === hash;
   };
@@ -290,14 +321,14 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const comboString = combination.join(',');
     const hash = sha256(comboString);
-    
+
     const storedHash = await getItemSecure(`${COMBINATION_PREFIX}${currentAccount.id}`);
-    
+
     if (storedHash === hash) {
       // Success!
       setFailedAttempts(0);
       setIsUnlocked(true);
-      
+
       // Update last active
       const nowStr = new Date().toISOString();
       const newList = accounts.map((a) => {
@@ -314,12 +345,12 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // Fail
       const newAttempts = failedAttempts + 1;
       setFailedAttempts(newAttempts);
-      
+
       if (newAttempts >= LOCKOUT_LIMIT) {
         setIsLockedOut(true);
         setLockoutRemaining(LOCKOUT_DURATION);
       }
-      
+
       // Trigger error haptic
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       return false;
@@ -340,7 +371,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (result.success) {
         setFailedAttempts(0);
         setIsUnlocked(true);
-        
+
         // Update last active time
         const nowStr = new Date().toISOString();
         const newList = accounts.map((a) => {
@@ -352,7 +383,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         await setItemSecure(ACCOUNTS_LIST_KEY, JSON.stringify(newList));
         setAccounts(newList);
         setCurrentAccount({ ...currentAccount, lastActive: nowStr });
-        
+
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         return true;
       }

@@ -7,6 +7,10 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Modal,
+  TouchableWithoutFeedback,
+  Alert,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTransactions } from '@/hooks/useTransactions';
@@ -16,22 +20,32 @@ import { useTheme } from '@/context/theme-context';
 import { AddTransactionModal } from '@/components/add-transaction-modal';
 import { DisplayOptionsModal } from '@/components/display-options-modal';
 
+const { height } = Dimensions.get('window');
+
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
 export default function RecordsScreen() {
-  const { transactions } = useTransactions();
-  const { colors } = useTheme();
+  const { currentMonthIndex, setCurrentMonthIndex, transactions, addTransaction, deleteTransaction } = useTransactions();
+  const { colors, isDarkMode } = useTheme();
+
   const [addModalVisible, setAddModalVisible] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState<any | null>(null);
+  const [isDetailModalVisible, setIsDetailModalVisible] = useState(false);
+  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [displayModalVisible, setDisplayModalVisible] = useState(false);
 
   // Preference states
   const [viewMode, setViewMode] = useState<'daily' | 'weekly' | 'monthly' | '3months' | '6months' | 'yearly'>('monthly');
   const [showTotal, setShowTotal] = useState<'yes' | 'no'>('yes');
   const [carryOver, setCarryOver] = useState<'on' | 'off'>('on');
-  const [currentDate, setCurrentDate] = useState(new Date('2026-06-30'));
+  const [currentDate, setCurrentDate] = useState(() => {
+    const d = new Date();
+    d.setMonth(currentMonthIndex);
+    return d;
+  });
 
   const getSelectorText = () => {
     const year = currentDate.getFullYear();
@@ -91,6 +105,7 @@ export default function RecordsScreen() {
       newDate.setFullYear(newDate.getFullYear() - 1);
     }
     setCurrentDate(newDate);
+    setCurrentMonthIndex(newDate.getMonth());
   };
 
   const handleNextDate = () => {
@@ -109,6 +124,7 @@ export default function RecordsScreen() {
       newDate.setFullYear(newDate.getFullYear() + 1);
     }
     setCurrentDate(newDate);
+    setCurrentMonthIndex(newDate.getMonth());
   };
 
   const getFilteredTransactions = () => {
@@ -232,26 +248,38 @@ export default function RecordsScreen() {
             </Text>
           </View>
         ) : (
-          filteredTransactions.map((tx) => (
-            <View key={tx.id} style={[styles.txRow, { backgroundColor: colors.card }]}>
-              <View style={[styles.txIconContainer, { backgroundColor: `${getCategoryColor(tx.category)}15` }]}>
-                <Ionicons name={getCategoryIcon(tx.category) as any} size={20} color={getCategoryColor(tx.category)} />
-              </View>
-              <View style={styles.txDetails}>
-                <Text style={[styles.txCategory, { color: colors.text }]}>{tx.category}</Text>
-                <Text style={[styles.txDesc, { color: colors.textSecondary }]}>{tx.description || tx.category}</Text>
-              </View>
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text style={[
-                  styles.txAmount,
-                  tx.type === 'income' ? styles.incomeAmount : styles.expenseAmount
-                ]}>
-                  {tx.type === 'income' ? '+' : '-'}${tx.amount.toFixed(2)}
-                </Text>
-                <Text style={[styles.txDate, { color: colors.textSecondary }]}>{tx.date}</Text>
-              </View>
-            </View>
-          ))
+          filteredTransactions.map((tx) => {
+            const catColor = tx.categoryColor || getCategoryColor(tx.category);
+            const catIcon = tx.categoryIcon || getCategoryIcon(tx.category);
+            return (
+              <TouchableOpacity
+                key={tx.id}
+                style={[styles.txRow, { backgroundColor: colors.card }]}
+                activeOpacity={0.7}
+                onPress={() => {
+                  setSelectedTransaction(tx);
+                  setIsDetailModalVisible(true);
+                }}
+              >
+                <View style={[styles.txIconContainer, { backgroundColor: `${catColor}15` }]}>
+                  <Ionicons name={catIcon as any} size={20} color={catColor} />
+                </View>
+                <View style={styles.txDetails}>
+                  <Text style={[styles.txCategory, { color: colors.text }]}>{tx.category}</Text>
+                  <Text style={[styles.txDesc, { color: colors.textSecondary }]}>{tx.description || tx.category}</Text>
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={[
+                    styles.txAmount,
+                    tx.type === 'income' ? styles.incomeAmount : styles.expenseAmount
+                  ]}>
+                    {tx.type === 'income' ? '+' : '-'}₱{tx.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Text>
+                  <Text style={[styles.txDate, { color: colors.textSecondary }]}>{tx.date}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })
         )}
         <View style={{ height: 80 }} />
       </ScrollView>
@@ -269,6 +297,134 @@ export default function RecordsScreen() {
       <AddTransactionModal
         visible={addModalVisible}
         onClose={() => setAddModalVisible(false)}
+      />
+
+      {/* Transaction Details Modal */}
+      <Modal
+        visible={isDetailModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setIsDetailModalVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setIsDetailModalVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.detailModalContent, { backgroundColor: colors.card }]}>
+                {selectedTransaction && (() => {
+                  const headerBg = selectedTransaction.type === 'income' ? '#0D8A63' : '#FF6B6B';
+                  const catColor = selectedTransaction.categoryColor || '#6B7B77';
+                  
+                  return (
+                    <>
+                      {/* Colored Header Area */}
+                      <View style={[styles.detailHeaderSection, { backgroundColor: headerBg }]}>
+                        {/* Action buttons */}
+                        <View style={styles.detailHeaderTopRow}>
+                          <TouchableOpacity onPress={() => setIsDetailModalVisible(false)} style={styles.detailHeaderBtn}>
+                            <Ionicons name="close" size={24} color="#FFFFFF" />
+                          </TouchableOpacity>
+                          <View style={{ flexDirection: 'row', gap: 16 }}>
+                            <TouchableOpacity
+                              onPress={() => {
+                                Alert.alert(
+                                  'Delete Record',
+                                  'Are you sure you want to delete this record?',
+                                  [
+                                    { text: 'Cancel', style: 'cancel' },
+                                    {
+                                      text: 'Delete',
+                                      style: 'destructive',
+                                      onPress: async () => {
+                                        await deleteTransaction(selectedTransaction);
+                                        setIsDetailModalVisible(false);
+                                        setSelectedTransaction(null);
+                                      }
+                                    }
+                                  ]
+                                );
+                              }}
+                              style={styles.detailHeaderBtn}
+                            >
+                              <Ionicons name="trash-outline" size={22} color="#FFFFFF" />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => {
+                                setIsDetailModalVisible(false);
+                                setIsEditModalVisible(true);
+                              }}
+                              style={styles.detailHeaderBtn}
+                            >
+                              <Ionicons name="create-outline" size={22} color="#FFFFFF" />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+
+                        {/* Summary Label & Amount */}
+                        <Text style={styles.detailHeaderLabel}>{selectedTransaction.type.toUpperCase()}</Text>
+                        <Text style={styles.detailHeaderAmount}>
+                          ₱{selectedTransaction.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </Text>
+                        
+                        {/* Selected Date */}
+                        <Text style={styles.detailHeaderDate}>
+                          {(() => {
+                            const d = new Date(selectedTransaction.date);
+                            if (isNaN(d.getTime())) return selectedTransaction.date;
+                            return d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) + ' 9:40 AM';
+                          })()}
+                        </Text>
+                      </View>
+
+                      {/* Content Area */}
+                      <View style={styles.detailContentSection}>
+                        {/* Account Row */}
+                        <View style={styles.detailInfoRow}>
+                          <Text style={[styles.detailInfoLabel, { color: colors.textSecondary }]}>Account</Text>
+                          <View style={[styles.detailCapsule, { borderColor: isDarkMode ? '#FFFFFF22' : '#00000015' }]}>
+                            <Ionicons name="wallet-outline" size={16} color={colors.text} />
+                            <Text style={[styles.detailCapsuleText, { color: colors.text }]}>
+                              {selectedTransaction.accountName || 'Cash'}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Category Row */}
+                        <View style={styles.detailInfoRow}>
+                          <Text style={[styles.detailInfoLabel, { color: colors.textSecondary }]}>Category</Text>
+                          <View style={[styles.detailCapsule, { borderColor: isDarkMode ? '#FFFFFF22' : '#00000015' }]}>
+                            <View style={[styles.detailCategoryDot, { backgroundColor: catColor }]} />
+                            <Text style={[styles.detailCapsuleText, { color: colors.text }]}>
+                              {selectedTransaction.category}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Notes Area */}
+                        {selectedTransaction.description ? (
+                          <View style={styles.detailNotesContainer}>
+                            <Text style={[styles.detailNotesText, { color: colors.text }]}>
+                              {selectedTransaction.description}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    </>
+                  );
+                })()}
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* Edit Transaction Modal */}
+      <AddTransactionModal
+        visible={isEditModalVisible}
+        onClose={() => {
+          setIsEditModalVisible(false);
+          setSelectedTransaction(null);
+        }}
+        transactionToEdit={selectedTransaction}
       />
 
       {/* Display Options Modal */}
@@ -430,5 +586,100 @@ const styles = StyleSheet.create({
   },
   expenseAmount: {
     color: '#D32F2F', // Soft Red
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    justifyContent: 'flex-end',
+  },
+  detailModalContent: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    overflow: 'hidden',
+    minHeight: height * 0.5,
+  },
+  detailHeaderSection: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 24,
+    alignItems: 'center',
+  },
+  detailHeaderTopRow: {
+    flexDirection: 'row',
+    width: '100%',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  detailHeaderBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  detailHeaderLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(255, 255, 255, 0.8)',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  detailHeaderAmount: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 6,
+  },
+  detailHeaderDate: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontWeight: '500',
+  },
+  detailContentSection: {
+    padding: 24,
+    gap: 16,
+  },
+  detailInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  detailInfoLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  detailCapsule: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderRadius: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    gap: 8,
+  },
+  detailCapsuleText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  detailCategoryDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+  },
+  detailNotesContainer: {
+    marginTop: 8,
+    padding: 16,
+    backgroundColor: 'rgba(107, 123, 119, 0.08)',
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  detailNotesText: {
+    fontSize: 14,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });

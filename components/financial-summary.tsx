@@ -14,7 +14,8 @@ export function FinancialSummary() {
 
   // Filter transactions for currently selected month of 2026
   const monthString = (currentMonthIndex + 1).toString().padStart(2, '0');
-  const monthPrefix = `2026-${monthString}`;
+  const currentYear = new Date().getFullYear();
+  const monthPrefix = `${currentYear}-${monthString}`;
   const filteredTransactions = transactions.filter(t => t.date.startsWith(monthPrefix));
 
   // Compute summary values
@@ -29,7 +30,7 @@ export function FinancialSummary() {
   const balance = totalIncome - totalExpense;
 
   const formatCurrency = (val: number) => {
-    return `$${val.toFixed(2)}`;
+    return `₱${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
   return (

@@ -2,7 +2,9 @@ import { DarkTheme, DefaultTheme, ThemeProvider as NavThemeProvider } from '@rea
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
+import '@/utils/notifications';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SQLiteProvider } from 'expo-sqlite';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { SidebarProvider } from '@/context/sidebar-context';
@@ -10,6 +12,8 @@ import { Sidebar } from '@/components/sidebar';
 import { ThemeProvider } from '@/context/theme-context';
 import { VaultProvider, useVault } from '@/context/vault-context';
 import { VaultScreen } from '@/components/vault/vault-screen';
+import { initializeDatabase } from '../db/schema';
+import { DatabaseErrorBoundary, DatabaseSuccessTracker } from '@/components/database-error-boundary';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -40,13 +44,19 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ThemeProvider>
-        <NavThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-          <VaultProvider>
-            <AppContent colorScheme={colorScheme ?? 'light'} />
-          </VaultProvider>
-        </NavThemeProvider>
-      </ThemeProvider>
+      <DatabaseErrorBoundary>
+        <SQLiteProvider databaseName="cvault.db" onInit={initializeDatabase}>
+          <DatabaseSuccessTracker />
+          <ThemeProvider>
+            <NavThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+              <VaultProvider>
+                <AppContent colorScheme={colorScheme ?? 'light'} />
+              </VaultProvider>
+            </NavThemeProvider>
+          </ThemeProvider>
+        </SQLiteProvider>
+      </DatabaseErrorBoundary>
     </GestureHandlerRootView>
   );
 }
+
