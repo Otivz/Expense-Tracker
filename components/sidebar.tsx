@@ -1,5 +1,7 @@
 import { useSidebar } from '@/context/sidebar-context';
 import { useTheme } from '@/context/theme-context';
+import { useVault } from '@/context/vault-context';
+import { supabase, isSupabaseConfigured } from '@/utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useRef } from 'react';
@@ -25,6 +27,7 @@ export function Sidebar() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors, isDarkMode } = useTheme();
+  const { selectAccount } = useVault();
 
   // Animations
   const slideAnim = useRef(new Animated.Value(-SIDEBAR_WIDTH)).current;
@@ -124,8 +127,15 @@ export function Sidebar() {
           {
             text: 'Logout',
             style: 'destructive',
-            onPress: () => {
-              Alert.alert('Logged Out', 'You have been successfully logged out.');
+            onPress: async () => {
+              // Trigger sign out from Supabase in the background so it doesn't block local logout
+              if (isSupabaseConfigured && supabase) {
+                supabase.auth.signOut().catch((e) => {
+                  console.error('Error signing out from Supabase:', e);
+                });
+              }
+              // Immediately clear the active account and lock the vault locally
+              await selectAccount(null);
             },
           },
         ]
