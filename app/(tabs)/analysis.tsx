@@ -70,7 +70,7 @@ export default function AnalysisScreen() {
   const [dbAccounts, setDbAccounts] = useState<any[]>([]);
 
   // Interactive calendar and details modal state
-  const [selectedDay, setSelectedDay] = useState<number | null>(null);
+  const [selectedDay, setSelectedDay] = useState<Date | null>(null);
   const [isDetailsModalVisible, setIsDetailsModalVisible] = useState(false);
   const [detailsTab, setDetailsTab] = useState<'expense' | 'income'>('expense');
 
@@ -91,6 +91,19 @@ export default function AnalysisScreen() {
     d.setMonth(currentMonthIndex);
     return d;
   });
+
+  const [tappedPoint, setTappedPoint] = useState<{
+    index: number;
+    x: number;
+    y: number;
+    date: Date;
+    amount: number;
+    flowType: 'expense' | 'income';
+  } | null>(null);
+
+  useEffect(() => {
+    setTappedPoint(null);
+  }, [viewMode, currentDate, selectedOption]);
 
   const loadAnalysisData = useCallback(async () => {
     try {
@@ -286,26 +299,57 @@ export default function AnalysisScreen() {
   const firstDayIndex = new Date(year, currentDate.getMonth(), 1).getDay();
   const totalDays = new Date(year, currentDate.getMonth() + 1, 0).getDate();
 
-  const calendarDays: (number | null)[] = [];
-  for (let i = 0; i < firstDayIndex; i++) {
-    calendarDays.push(null);
-  }
-  for (let i = 1; i <= totalDays; i++) {
-    calendarDays.push(i);
-  }
+  const calendarDays = (() => {
+    if (viewMode === 'daily') {
+      const dayOfWeek = currentDate.getDay();
+      const list: (Date | null)[] = [];
+      for (let i = 0; i < dayOfWeek; i++) {
+        list.push(null);
+      }
+      list.push(new Date(currentDate));
+      for (let i = dayOfWeek + 1; i < 7; i++) {
+        list.push(null);
+      }
+      return list;
+    }
+
+    if (viewMode === 'weekly') {
+      const list: (Date | null)[] = [];
+      const sun = new Date(currentDate);
+      sun.setDate(currentDate.getDate() - currentDate.getDay());
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(sun);
+        d.setDate(sun.getDate() + i);
+        list.push(d);
+      }
+      return list;
+    }
+
+    // Default: monthly, 3months, 6months, yearly
+    // Show all days of the current month
+    const list: (Date | null)[] = [];
+    for (let i = 0; i < firstDayIndex; i++) {
+      list.push(null);
+    }
+    for (let i = 1; i <= totalDays; i++) {
+      list.push(new Date(year, currentDate.getMonth(), i));
+    }
+    return list;
+  })();
 
   // Group transactions of selected month by day
-  const getDayTransactions = (day: number) => {
-    const dayStr = day.toString().padStart(2, '0');
-    const monthString = (currentDate.getMonth() + 1).toString().padStart(2, '0');
-    const dateStr = `2026-${monthString}-${dayStr}`;
+  const getDayTransactions = (date: Date) => {
+    const yearStr = date.getFullYear();
+    const monthString = (date.getMonth() + 1).toString().padStart(2, '0');
+    const dayStr = date.getDate().toString().padStart(2, '0');
+    const dateStr = `${yearStr}-${monthString}-${dayStr}`;
     return monthTransactions.filter(t => t.date === dateStr);
   };
 
-  const handleDayPress = (day: number) => {
-    const dayTxs = getDayTransactions(day);
+  const handleDayPress = (date: Date) => {
+    const dayTxs = getDayTransactions(date);
     if (dayTxs.length > 0) {
-      setSelectedDay(day);
+      setSelectedDay(date);
       // Auto-select tab with data
       const hasExpense = dayTxs.some(t => t.type === 'expense');
       setDetailsTab(hasExpense ? 'expense' : 'income');
@@ -315,20 +359,70 @@ export default function AnalysisScreen() {
 
   // SVG Line Chart coordinates calculation helper
   const renderFlowLineChart = (flowType: 'expense' | 'income') => {
-    const filtered = monthTransactions.filter(t => t.type === flowType);
+    // Generate dates in the current selected view range
+    const dates: Date[] = [];
+    const currentYearVal = currentDate.getFullYear();
 
-    // Group amounts by weekly periods: Days 1-7, 8-14, 15-21, 22-28, 29-31
-    const weeks = [0, 0, 0, 0, 0];
-    filtered.forEach(t => {
-      const day = parseInt(t.date.split('-')[2], 10);
-      if (day <= 7) weeks[0] += t.amount;
-      else if (day <= 14) weeks[1] += t.amount;
-      else if (day <= 21) weeks[2] += t.amount;
-      else if (day <= 28) weeks[3] += t.amount;
-      else weeks[4] += t.amount;
+    if (viewMode === 'daily') {
+      dates.push(new Date(currentDate));
+    } else if (viewMode === 'weekly') {
+      const sun = new Date(currentDate);
+      sun.setDate(currentDate.getDate() - currentDate.getDay());
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(sun);
+        d.setDate(sun.getDate() + i);
+        dates.push(d);
+      }
+    } else if (viewMode === 'monthly') {
+      const totalDays = new Date(currentYearVal, currentDate.getMonth() + 1, 0).getDate();
+      for (let i = 1; i <= totalDays; i++) {
+        dates.push(new Date(currentYearVal, currentDate.getMonth(), i));
+      }
+    } else if (viewMode === '3months') {
+      const start = new Date(currentDate);
+      start.setDate(1);
+      const end = new Date(start);
+      end.setMonth(start.getMonth() + 3);
+      end.setDate(0);
+      
+      const curr = new Date(start);
+      while (curr <= end) {
+        dates.push(new Date(curr));
+        curr.setDate(curr.getDate() + 1);
+      }
+    } else if (viewMode === '6months') {
+      const isFirstHalf = currentDate.getMonth() < 6;
+      const startMonth = isFirstHalf ? 0 : 6;
+      const start = new Date(currentYearVal, startMonth, 1);
+      const end = new Date(currentYearVal, startMonth + 6, 0);
+      
+      const curr = new Date(start);
+      while (curr <= end) {
+        dates.push(new Date(curr));
+        curr.setDate(curr.getDate() + 1);
+      }
+    } else if (viewMode === 'yearly') {
+      const start = new Date(currentYearVal, 0, 1);
+      const end = new Date(currentYearVal, 12, 0);
+      
+      const curr = new Date(start);
+      while (curr <= end) {
+        dates.push(new Date(curr));
+        curr.setDate(curr.getDate() + 1);
+      }
+    }
+
+    // Get daily total values for each date in dates list
+    const dailyValues = dates.map(d => {
+      const yearStr = d.getFullYear();
+      const monthStr = (d.getMonth() + 1).toString().padStart(2, '0');
+      const dayStr = d.getDate().toString().padStart(2, '0');
+      const dateStr = `${yearStr}-${monthStr}-${dayStr}`;
+      const dayTxs = transactions.filter(t => t.date === dateStr && t.type === flowType);
+      return dayTxs.reduce((sum, t) => sum + t.amount, 0);
     });
 
-    const maxAmt = Math.max(...weeks, 100);
+    const maxAmt = Math.max(...dailyValues, 100);
     const height = 145;
     const chartWidth = width - 72;
     const paddingLeft = 75;
@@ -336,9 +430,9 @@ export default function AnalysisScreen() {
     const paddingTop = 15;
     const paddingBottom = 30;
 
-    // Map weeks to coordinates
-    const points = weeks.map((amt, idx) => {
-      const x = paddingLeft + (idx * (chartWidth - paddingLeft - paddingRight)) / 4;
+    // Map daily values to chart coordinates
+    const points = dailyValues.map((amt, idx) => {
+      const x = paddingLeft + (idx * (chartWidth - paddingLeft - paddingRight)) / (dates.length - 1 || 1);
       const y = height - paddingBottom - (amt / maxAmt) * (height - paddingTop - paddingBottom);
       return { x, y };
     });
@@ -371,6 +465,23 @@ export default function AnalysisScreen() {
       const sign = flowType === 'expense' ? '-' : '+';
       return `${sign}${formatCurrency(val)}`;
     };
+
+    // Determine label indices
+    const labelIndices: number[] = [];
+    if (dates.length <= 7) {
+      dates.forEach((_, idx) => labelIndices.push(idx));
+    } else {
+      const count = 5;
+      for (let i = 0; i < count; i++) {
+        const idx = Math.min(
+          dates.length - 1,
+          Math.round((i * (dates.length - 1)) / (count - 1))
+        );
+        if (!labelIndices.includes(idx)) {
+          labelIndices.push(idx);
+        }
+      }
+    }
 
     return (
       <View style={styles.chartContainer}>
@@ -405,6 +516,32 @@ export default function AnalysisScreen() {
             </React.Fragment>
           ))}
 
+          {/* Vertical and Horizontal Guide Lines when a point is tapped */}
+          {tappedPoint && tappedPoint.flowType === flowType && (
+            <>
+              {/* Vertical line */}
+              <Line
+                x1={tappedPoint.x}
+                y1={paddingTop}
+                x2={tappedPoint.x}
+                y2={height - paddingBottom}
+                stroke="#4D96FF"
+                strokeWidth="1"
+                strokeDasharray="3,3"
+              />
+              {/* Horizontal line */}
+              <Line
+                x1={paddingLeft}
+                y1={tappedPoint.y}
+                x2={chartWidth - paddingRight}
+                y2={tappedPoint.y}
+                stroke="#4D96FF"
+                strokeWidth="1"
+                strokeDasharray="3,3"
+              />
+            </>
+          )}
+
           {/* Gradient Area Fill */}
           {fillPathData ? (
             <>
@@ -423,23 +560,38 @@ export default function AnalysisScreen() {
           ) : null}
 
           {/* Dots on points */}
-          {points.map((p, idx) => (
-            <Circle
-              key={idx}
-              cx={p.x}
-              cy={p.y}
-              r="4.5"
-              fill="#FFFFFF"
-              stroke={strokeColor}
-              strokeWidth="2.5"
-            />
-          ))}
+          {points.map((p, idx) => {
+            const isSelected = tappedPoint && tappedPoint.index === idx && tappedPoint.flowType === flowType;
+            return (
+              <Circle
+                key={idx}
+                cx={p.x}
+                cy={p.y}
+                r={isSelected ? 6 : 4.5}
+                fill={isSelected ? strokeColor : "#FFFFFF"}
+                stroke={strokeColor}
+                strokeWidth="2.5"
+                onPress={() => {
+                  setTappedPoint({
+                    index: idx,
+                    x: p.x,
+                    y: p.y,
+                    date: dates[idx],
+                    amount: dailyValues[idx],
+                    flowType,
+                  });
+                }}
+              />
+            );
+          })}
 
           {/* X Axis Labels */}
-          {points.map((p, idx) => {
-            const days = ['01', '08', '16', '23', '30'];
-            const monthAbbr = MONTHS[currentMonthIndex].substring(0, 3);
-            const labelText = `${monthAbbr} ${days[idx]}`;
+          {labelIndices.map((idx) => {
+            const p = points[idx];
+            const dateObj = dates[idx];
+            const monthAbbr = MONTHS[dateObj.getMonth()].substring(0, 3);
+            const dayNum = dateObj.getDate().toString().padStart(2, '0');
+            const labelText = `${monthAbbr} ${dayNum}`;
             return (
               <SvgText
                 key={`x-label-${idx}`}
@@ -455,8 +607,169 @@ export default function AnalysisScreen() {
             );
           })}
         </Svg>
+
+        {/* Tooltip Popup Overlay */}
+        {tappedPoint && tappedPoint.flowType === flowType && (
+          <View
+            style={{
+              position: 'absolute',
+              left: Math.max(paddingLeft, Math.min(chartWidth - 95, tappedPoint.x - 40)),
+              top: Math.max(5, tappedPoint.y - 48),
+              backgroundColor: isDarkMode ? '#2D3D3A' : '#1A2E2B',
+              borderRadius: 8,
+              paddingVertical: 4,
+              paddingHorizontal: 8,
+              borderWidth: 1,
+              borderColor: strokeColor,
+              alignItems: 'center',
+              shadowColor: '#000000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.25,
+              shadowRadius: 3.84,
+              elevation: 5,
+            }}
+          >
+            <Text style={{ color: '#B0B0B0', fontSize: 10, fontWeight: '700' }}>
+              {tappedPoint.date.toLocaleDateString('en-US', { month: 'short', day: '2-digit' })}
+            </Text>
+            <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: 'bold', marginTop: 1 }}>
+              ₱{tappedPoint.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </Text>
+          </View>
+        )}
       </View>
     );
+  };
+
+  const renderCalendarsForMode = (isExpense: boolean, flowColor: string) => {
+    const targetMonths: Date[] = [];
+    const yearVal = currentDate.getFullYear();
+
+    if (viewMode === 'daily' || viewMode === 'weekly' || viewMode === 'monthly') {
+      targetMonths.push(new Date(currentDate));
+    } else if (viewMode === '3months') {
+      const start = new Date(currentDate);
+      start.setDate(1);
+      for (let i = 0; i < 3; i++) {
+        const d = new Date(start);
+        d.setMonth(start.getMonth() + i);
+        targetMonths.push(d);
+      }
+    } else if (viewMode === '6months') {
+      const isFirstHalf = currentDate.getMonth() < 6;
+      const startMonth = isFirstHalf ? 0 : 6;
+      for (let i = 0; i < 6; i++) {
+        targetMonths.push(new Date(yearVal, startMonth + i, 1));
+      }
+    } else if (viewMode === 'yearly') {
+      for (let i = 0; i < 12; i++) {
+        targetMonths.push(new Date(yearVal, i, 1));
+      }
+    }
+
+    return targetMonths.map((monthDate, mIdx) => {
+      const mYear = monthDate.getFullYear();
+      const mMonth = monthDate.getMonth();
+      const firstDayIdx = new Date(mYear, mMonth, 1).getDay();
+      const totalDaysInMonth = new Date(mYear, mMonth + 1, 0).getDate();
+
+      const mCalendarDays = (() => {
+        if (viewMode === 'daily') {
+          const dayOfWeek = currentDate.getDay();
+          const list: (Date | null)[] = [];
+          for (let i = 0; i < dayOfWeek; i++) {
+            list.push(null);
+          }
+          list.push(new Date(currentDate));
+          for (let i = dayOfWeek + 1; i < 7; i++) {
+            list.push(null);
+          }
+          return list;
+        }
+
+        if (viewMode === 'weekly') {
+          const list: (Date | null)[] = [];
+          const sun = new Date(currentDate);
+          sun.setDate(currentDate.getDate() - currentDate.getDay());
+          for (let i = 0; i < 7; i++) {
+            const d = new Date(sun);
+            d.setDate(sun.getDate() + i);
+            list.push(d);
+          }
+          return list;
+        }
+
+        const list: (Date | null)[] = [];
+        for (let i = 0; i < firstDayIdx; i++) {
+          list.push(null);
+        }
+        for (let i = 1; i <= totalDaysInMonth; i++) {
+          list.push(new Date(mYear, mMonth, i));
+        }
+        return list;
+      })();
+
+      const calendarTitle = viewMode === 'weekly' 
+        ? getSelectorText() 
+        : viewMode === 'daily' 
+        ? `${MONTHS[monthDate.getMonth()]} ${monthDate.getDate()}, ${mYear}`
+        : `${MONTHS[mMonth]} ${mYear}`;
+
+      return (
+        <View key={`month-section-${mIdx}`} style={{ marginBottom: 24 }}>
+          {/* Calendar Month Header */}
+          <View style={styles.calendarHeaderContainer}>
+            <Text style={styles.calendarTitleText}>{calendarTitle}</Text>
+          </View>
+
+          {/* Weekdays Row */}
+          <View style={styles.weekdaysRow}>
+            {WEEKDAYS.map(day => (
+              <Text key={day} style={styles.weekdayText}>{day}</Text>
+            ))}
+          </View>
+
+          {/* Grid days */}
+          <View style={styles.calendarGrid}>
+            {mCalendarDays.map((day, idx) => {
+              if (day === null) {
+                return <View key={`empty-${mIdx}-${idx}`} style={styles.calendarCellEmpty} />;
+              }
+
+              const dayTxs = getDayTransactions(day);
+              const dayFlows = dayTxs.filter(t => t.type === (isExpense ? 'expense' : 'income'));
+              const totalAmt = dayFlows.reduce((sum, t) => sum + t.amount, 0);
+
+              const hasTxs = dayTxs.length > 0;
+              const hasFlowTxs = dayFlows.length > 0;
+
+              return (
+                <TouchableOpacity
+                  key={`day-${day.toISOString()}`}
+                  style={[
+                    styles.calendarCell,
+                    hasFlowTxs && styles.calendarCellWithTx
+                  ]}
+                  onPress={() => handleDayPress(day)}
+                  disabled={!hasTxs}
+                >
+                  <Text style={styles.calendarDayNum}>{day.getDate()}</Text>
+                  {hasFlowTxs ? (
+                    <Text style={[styles.calendarCellAmt, { color: flowColor }]}>
+                      {isExpense ? '-' : '+'}{totalAmt.toFixed(0)}
+                    </Text>
+                  ) : hasTxs ? (
+                    <View style={[styles.indicatorDot, { backgroundColor: isExpense ? '#0D8A63' : '#FF6B6B' }]} />
+                  ) : (
+                    <View style={styles.placeholderDot} />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      );
+    });
   };
 
   const renderSelectedContent = () => {
@@ -689,58 +1002,7 @@ export default function AnalysisScreen() {
             <View style={styles.divider} />
 
             {/* Interactive Calendar Grid */}
-            <View style={styles.calendarHeaderContainer}>
-              <Text style={styles.calendarTitleText}>{MONTHS[currentMonthIndex]} 2026</Text>
-            </View>
-
-            {/* Weekdays Row */}
-            <View style={styles.weekdaysRow}>
-              {WEEKDAYS.map(day => (
-                <Text key={day} style={styles.weekdayText}>{day}</Text>
-              ))}
-            </View>
-
-            {/* Grid days */}
-            <View style={styles.calendarGrid}>
-              {calendarDays.map((day, idx) => {
-                if (day === null) {
-                  return <View key={`empty-${idx}`} style={styles.calendarCellEmpty} />;
-                }
-
-                // Check transactions on this day
-                const dayTxs = getDayTransactions(day);
-                const dayFlows = dayTxs.filter(t => t.type === (isExpense ? 'expense' : 'income'));
-                const totalAmt = dayFlows.reduce((sum, t) => sum + t.amount, 0);
-
-                const hasTxs = dayTxs.length > 0;
-                const hasFlowTxs = dayFlows.length > 0;
-
-                return (
-                  <TouchableOpacity
-                    key={`day-${day}`}
-                    style={[
-                      styles.calendarCell,
-                      hasFlowTxs && styles.calendarCellWithTx
-                    ]}
-                    onPress={() => handleDayPress(day)}
-                    disabled={!hasTxs}
-                  >
-                    <Text style={styles.calendarDayNum}>{day}</Text>
-                    {hasFlowTxs ? (
-                      <Text style={[styles.calendarCellAmt, { color: flowColor }]}>
-                        {isExpense ? '-' : '+'}{totalAmt.toFixed(0)}
-                      </Text>
-                    ) : hasTxs ? (
-                      // Dot if there are transactions but of the other type
-                      <View style={[styles.indicatorDot, { backgroundColor: isExpense ? '#0D8A63' : '#FF6B6B' }]} />
-                    ) : (
-                      // Light placeholder dot for clean grid
-                      <View style={styles.placeholderDot} />
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+            {renderCalendarsForMode(isExpense, flowColor)}
           </View>
         );
       }
@@ -1081,7 +1343,7 @@ export default function AnalysisScreen() {
                 {/* Header */}
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>
-                    {MONTHS[currentMonthIndex]} {selectedDay}, 2026
+                    {selectedDay ? selectedDay.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : ''}
                   </Text>
                   <TouchableOpacity onPress={() => setIsDetailsModalVisible(false)}>
                     <Ionicons name="close" size={24} color="#6B7B77" />

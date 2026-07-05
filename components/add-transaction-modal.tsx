@@ -10,7 +10,6 @@ import {
   Alert,
   Dimensions,
   Modal,
-  PanResponder,
   Platform,
   ScrollView,
   StyleSheet,
@@ -18,9 +17,10 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  PanResponder,
 } from 'react-native';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
 interface AddTransactionModalProps {
   visible: boolean;
@@ -28,8 +28,6 @@ interface AddTransactionModalProps {
   defaultAccount?: string;
   transactionToEdit?: Transaction | null;
 }
-
-// Hardcoded lists removed. Categories are fetched dynamically from database.
 
 export function AddTransactionModal({ visible, onClose, defaultAccount, transactionToEdit }: AddTransactionModalProps) {
   const { colors, isDarkMode } = useTheme();
@@ -48,7 +46,6 @@ export function AddTransactionModal({ visible, onClose, defaultAccount, transact
   const [notes, setNotes] = useState('');
   const [amountExpr, setAmountExpr] = useState('0');
   const [dbAccounts, setDbAccounts] = useState<string[]>([]);
-
   const [dbCategories, setDbCategories] = useState<Category[]>([]);
 
   // Load dynamic accounts & categories from SQLite database
@@ -147,17 +144,17 @@ export function AddTransactionModal({ visible, onClose, defaultAccount, transact
     const dx = locationX - 100;
     const dy = locationY - 100;
     const distance = Math.sqrt(dx * dx + dy * dy);
-    
+
     let angleDeg = Math.atan2(dy, dx) * (180 / Math.PI) + 90;
     if (angleDeg < 0) {
       angleDeg += 360;
     }
-    
+
     if (isNewTouch) {
       // Shorter Hour hand is targeted if touch is close to center (radius < 56)
       dragTargetRef.current = distance < 56 ? 'hour' : 'minute';
     }
-    
+
     if (dragTargetRef.current === 'hour') {
       let hour = Math.round(angleDeg / 30);
       if (hour === 0) hour = 12;
@@ -278,11 +275,9 @@ export function AddTransactionModal({ visible, onClose, defaultAccount, transact
 
   const evaluateExpression = (): number => {
     try {
-      // Clean expression for safe evaluation (replace × with *, ÷ with / if any)
       const cleanExpr = amountExpr.replace(/×/g, '*').replace(/÷/g, '/');
 
-      // Simple math evaluator using Function (safe here as we only input numbers and operators from our restricted keypad)
-      // Validate that it only contains numbers, operators and decimals
+      // Simple math evaluator using Function
       if (!/^[0-9.+\-*/\s]+$/.test(cleanExpr)) {
         return 0;
       }
@@ -388,199 +383,231 @@ export function AddTransactionModal({ visible, onClose, defaultAccount, transact
       <View style={[styles.modalContainer, { backgroundColor: colors.card }]}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={onClose}>
-            <Text style={[styles.headerBtnText, { color: isDarkMode ? '#FFFFFF' : colors.primary }]}>CANCEL</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleSave}>
-            <Text style={[styles.headerBtnText, { color: isDarkMode ? '#FFFFFF' : colors.primary }]}>SAVE</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Segmented Control */}
-        <View style={[styles.tabsContainer, { backgroundColor: isDarkMode ? '#1D2E2B' : '#EAF4F1' }]}>
-          {(['income', 'expense', 'transfer'] as const).map((tab) => {
-            const isSelected = activeTab === tab;
-            return (
-              <TouchableOpacity
-                key={tab}
-                style={[
-                  styles.tabButton,
-                  isSelected && { backgroundColor: isDarkMode ? colors.primary : '#FFFFFF' },
-                ]}
-                onPress={() => {
-                  setActiveTab(tab);
-                  // Update default category based on type
-                  setCategory(tab === 'income' ? 'Salary' : 'Food');
-                }}
-              >
-                {isSelected && (
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={16}
-                    color={isDarkMode ? '#FFFFFF' : '#00684F'}
-                    style={{ marginRight: 4 }}
-                  />
-                )}
-                <Text
-                  style={[
-                    styles.tabButtonText,
-                    { color: isSelected ? (isDarkMode ? '#FFFFFF' : '#00684F') : colors.textSecondary },
-                  ]}
-                >
-                  {tab.toUpperCase()}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        {/* Selectors Grid */}
-        <View style={styles.selectorsGrid}>
-          {activeTab === 'transfer' ? (
-            <>
-              {/* From Account Selector */}
-              <View style={styles.selectorCol}>
-                <Text style={[styles.selectorLabel, { color: colors.textSecondary }]}>From</Text>
-                <TouchableOpacity
-                  style={[styles.selectorButton, { borderColor: colors.border }]}
-                  onPress={() => openAccountPicker('fromAccount')}
-                >
-                  <Ionicons name="wallet-outline" size={18} color={colors.primary} />
-                  <Text style={[styles.selectorValueText, { color: colors.text }]} numberOfLines={1}>
-                    {fromAccount}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* To Account Selector */}
-              <View style={styles.selectorCol}>
-                <Text style={[styles.selectorLabel, { color: colors.textSecondary }]}>To</Text>
-                <TouchableOpacity
-                  style={[styles.selectorButton, { borderColor: colors.border }]}
-                  onPress={() => openAccountPicker('toAccount')}
-                >
-                  <Ionicons name="wallet-outline" size={18} color={colors.primary} />
-                  <Text style={[styles.selectorValueText, { color: colors.text }]} numberOfLines={1}>
-                    {toAccount}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </>
-          ) : (
-            <>
-              {/* Account Selector */}
-              <View style={styles.selectorCol}>
-                <Text style={[styles.selectorLabel, { color: colors.textSecondary }]}>Account</Text>
-                <TouchableOpacity
-                  style={[styles.selectorButton, { borderColor: colors.border }]}
-                  onPress={() => openAccountPicker('account')}
-                >
-                  <Ionicons name="wallet-outline" size={18} color={colors.primary} />
-                  <Text style={[styles.selectorValueText, { color: colors.text }]} numberOfLines={1}>
-                    {account}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Category Selector */}
-              <View style={styles.selectorCol}>
-                <Text style={[styles.selectorLabel, { color: colors.textSecondary }]}>Category</Text>
-                <TouchableOpacity
-                  style={[styles.selectorButton, { borderColor: colors.border }]}
-                  onPress={() => setShowCategoryPicker(true)}
-                >
-                  <Ionicons name="pricetag-outline" size={18} color={colors.primary} />
-                  <Text style={[styles.selectorValueText, { color: colors.text }]} numberOfLines={1}>
-                    {category}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </>
-          )}
-        </View>
-
-        {/* Notes Input */}
-        <TextInput
-          style={[
-            styles.notesInput,
-            {
-              borderColor: colors.border,
-              backgroundColor: isDarkMode ? '#243330' : '#F4FAF8',
-              color: colors.text,
-            },
-          ]}
-          placeholder="Add notes"
-          placeholderTextColor={colors.textSecondary}
-          value={notes}
-          onChangeText={setNotes}
-          multiline
-        />
-
-        {/* Spacer to push calculator and keypad to the bottom */}
-        <View style={{ flex: 1 }} />
-
-        {/* Calculator Output View */}
-        <View style={[styles.calcOutputContainer, { borderColor: colors.border }]}>
-          <Text style={[styles.calcExprText, { color: colors.text }]} numberOfLines={1}>
-            {amountExpr}
+          <Text style={[styles.headerTitle, { color: colors.text }]}>
+            {transactionToEdit ? 'Edit Transaction' : 'Add Transaction'}
           </Text>
-          <TouchableOpacity onPress={() => handleKeyPress('backspace')} style={styles.backspaceBtn}>
-            <Ionicons name="backspace-outline" size={24} color={colors.textSecondary} />
-          </TouchableOpacity>
         </View>
 
-        {/* Keypad Grid */}
-        <View style={styles.keypadGrid}>
-          {keypad.map((row, rIdx) => (
-            <View key={rIdx} style={styles.keypadRow}>
-              {row.map((btn) => {
-                const isOperator = ['+', '-', '*', '/'].includes(btn);
-                const isEquals = btn === '=';
+        <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+          {/* Calculator Output View */}
+          <View style={[styles.calcOutputContainer, { borderColor: colors.border }]}>
+            <Text style={[styles.calcExprText, { color: colors.text }]} numberOfLines={1}>
+              {amountExpr}
+            </Text>
+            <TouchableOpacity onPress={() => handleKeyPress('backspace')} style={styles.backspaceBtn}>
+              <Ionicons name="backspace-outline" size={24} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
 
-                // Label transformations for cleaner display
-                let label = btn;
-                if (btn === '*') label = '×';
-                if (btn === '/') label = '÷';
+          {/* Keypad Grid */}
+          <View style={styles.keypadGrid}>
+            {keypad.map((row, rIdx) => (
+              <View key={rIdx} style={styles.keypadRow}>
+                {row.map((btn) => {
+                  const isOperator = ['+', '-', '*', '/'].includes(btn);
+                  const isEquals = btn === '=';
 
-                return (
-                  <TouchableOpacity
-                    key={btn}
-                    style={[
-                      styles.keypadBtn,
-                      { borderColor: colors.border },
-                      isOperator && { backgroundColor: isDarkMode ? '#283B38' : '#D0DFDC' },
-                      isEquals && { backgroundColor: colors.primary },
-                    ]}
-                    onPress={() => handleKeyPress(btn)}
-                  >
-                    <Text
+                  // Label transformations for cleaner display
+                  let label = btn;
+                  if (btn === '*') label = '×';
+                  if (btn === '/') label = '÷';
+
+                  return (
+                    <TouchableOpacity
+                      key={btn}
                       style={[
-                        styles.keypadBtnText,
-                        { color: isEquals ? '#FFFFFF' : colors.text },
-                        isOperator && { color: colors.primary, fontWeight: '700' },
+                        styles.keypadBtn,
+                        { borderColor: colors.border },
+                        isOperator && { backgroundColor: isDarkMode ? '#283B38' : '#D0DFDC' },
+                        isEquals && { backgroundColor: colors.primary },
                       ]}
+                      onPress={() => handleKeyPress(btn)}
                     >
-                      {label}
+                      <Text
+                        style={[
+                          styles.keypadBtnText,
+                          { color: isEquals ? '#FFFFFF' : colors.text },
+                          isOperator && { color: colors.primary, fontWeight: '700' },
+                        ]}
+                      >
+                        {label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ))}
+          </View>
+
+          {/* Notes Input */}
+          <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Notes</Text>
+          <TextInput
+            style={[
+              styles.notesInput,
+              {
+                borderColor: colors.border,
+                backgroundColor: isDarkMode ? '#243330' : '#F4FAF8',
+                color: colors.text,
+              },
+            ]}
+            placeholder="Add optional notes..."
+            placeholderTextColor={colors.textSecondary}
+            value={notes}
+            onChangeText={setNotes}
+            multiline
+          />
+
+          {/* Transaction Type Segmented Control */}
+          <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Transaction Type</Text>
+          <View style={[styles.tabsContainer, { backgroundColor: isDarkMode ? '#1D2E2B' : '#EAF4F1' }]}>
+            {(['income', 'expense', 'transfer'] as const).map((tab) => {
+              const isSelected = activeTab === tab;
+              return (
+                <TouchableOpacity
+                  key={tab}
+                  style={[
+                    styles.tabButton,
+                    isSelected && { backgroundColor: isDarkMode ? colors.primary : '#FFFFFF' },
+                  ]}
+                  onPress={() => {
+                    setActiveTab(tab);
+                    // Update default category based on type
+                    setCategory(tab === 'income' ? 'Salary' : 'Food');
+                  }}
+                >
+                  {isSelected && (
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={16}
+                      color={isDarkMode ? '#FFFFFF' : '#00684F'}
+                      style={{ marginRight: 4 }}
+                    />
+                  )}
+                  <Text
+                    style={[
+                      styles.tabButtonText,
+                      { color: isSelected ? (isDarkMode ? '#FFFFFF' : '#00684F') : colors.textSecondary },
+                    ]}
+                  >
+                    {tab.toUpperCase()}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Selectors Grid */}
+          <View style={styles.selectorsGrid}>
+            {activeTab === 'transfer' ? (
+              <>
+                {/* From Account Selector */}
+                <View style={styles.selectorCol}>
+                  <Text style={[styles.selectorLabel, { color: colors.textSecondary }]}>From</Text>
+                  <TouchableOpacity
+                    style={[styles.selectorButton, { borderColor: colors.border }]}
+                    onPress={() => openAccountPicker('fromAccount')}
+                  >
+                    <Ionicons name="wallet-outline" size={18} color={fromAccount ? colors.primary : '#FF6B6B'} />
+                    <Text style={[styles.selectorValueText, { color: fromAccount ? colors.text : '#FF6B6B', fontSize: fromAccount ? 15 : 12 }]} numberOfLines={1}>
+                      {fromAccount || 'Create Account'}
                     </Text>
                   </TouchableOpacity>
-                );
-              })}
-            </View>
-          ))}
-        </View>
+                </View>
 
-        {/* Date and Time Footer */}
-        <View style={[styles.footerRow, { borderTopColor: colors.border }]}>
-          <TouchableOpacity onPress={() => setShowDatePicker(true)} style={styles.footerCol}>
-            <Text style={[styles.footerText, { color: colors.text }]}>
-              {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-            </Text>
+                {/* To Account Selector */}
+                <View style={styles.selectorCol}>
+                  <Text style={[styles.selectorLabel, { color: colors.textSecondary }]}>To</Text>
+                  <TouchableOpacity
+                    style={[styles.selectorButton, { borderColor: colors.border }]}
+                    onPress={() => openAccountPicker('toAccount')}
+                  >
+                    <Ionicons name="wallet-outline" size={18} color={toAccount ? colors.primary : '#FF6B6B'} />
+                    <Text style={[styles.selectorValueText, { color: toAccount ? colors.text : '#FF6B6B', fontSize: toAccount ? 15 : 12 }]} numberOfLines={1}>
+                      {toAccount || 'Create Account'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                {/* Account Selector */}
+                <View style={styles.selectorCol}>
+                  <Text style={[styles.selectorLabel, { color: colors.textSecondary }]}>Account</Text>
+                  <TouchableOpacity
+                    style={[styles.selectorButton, { borderColor: colors.border }]}
+                    onPress={() => openAccountPicker('account')}
+                  >
+                    <Ionicons name="wallet-outline" size={18} color={account ? colors.primary : '#FF6B6B'} />
+                    <Text style={[styles.selectorValueText, { color: account ? colors.text : '#FF6B6B', fontSize: account ? 15 : 12 }]} numberOfLines={1}>
+                      {account || 'Create Account'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Category Selector */}
+                <View style={styles.selectorCol}>
+                  <Text style={[styles.selectorLabel, { color: colors.textSecondary }]}>Category</Text>
+                  <TouchableOpacity
+                    style={[styles.selectorButton, { borderColor: colors.border }]}
+                    onPress={() => setShowCategoryPicker(true)}
+                  >
+                    <Ionicons name="pricetag-outline" size={18} color={category ? colors.primary : '#FF6B6B'} />
+                    <Text style={[styles.selectorValueText, { color: category ? colors.text : '#FF6B6B', fontSize: category ? 15 : 12 }]} numberOfLines={1}>
+                      {category || 'Create Category'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+
+          {/* Date & Time Grid */}
+          <View style={styles.selectorsGrid}>
+            {/* Date Selector */}
+            <View style={styles.selectorCol}>
+              <Text style={[styles.selectorLabel, { color: colors.textSecondary }]}>Date</Text>
+              <TouchableOpacity
+                style={[styles.selectorButton, { borderColor: colors.border }]}
+                onPress={() => setShowDatePicker(true)}
+              >
+                <Ionicons name="calendar-outline" size={18} color={colors.primary} />
+                <Text style={[styles.selectorValueText, { color: colors.text }]} numberOfLines={1}>
+                  {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Time Selector */}
+            <View style={styles.selectorCol}>
+              <Text style={[styles.selectorLabel, { color: colors.textSecondary }]}>Time</Text>
+              <TouchableOpacity
+                style={[styles.selectorButton, { borderColor: colors.border }]}
+                onPress={() => setShowTimePicker(true)}
+              >
+                <Ionicons name="time-outline" size={18} color={colors.primary} />
+                <Text style={[styles.selectorValueText, { color: colors.text }]} numberOfLines={1}>
+                  {selectedHour}:{selectedMinute.toString().padStart(2, '0')} {selectedPeriod}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          
+          <View style={{ height: 24 }} />
+        </ScrollView>
+
+        {/* Pinned Bottom Cancel/Save Action Buttons */}
+        <View style={[styles.bottomActionsRow, { borderTopColor: colors.border }]}>
+          <TouchableOpacity 
+            style={[styles.actionButton, styles.cancelActionButton, { backgroundColor: isDarkMode ? '#243330' : '#EAF4F1' }]} 
+            onPress={onClose}
+          >
+            <Text style={[styles.actionButtonText, { color: colors.textSecondary }]}>CANCEL</Text>
           </TouchableOpacity>
-          <View style={[styles.footerDivider, { backgroundColor: colors.border }]} />
-          <TouchableOpacity onPress={() => setShowTimePicker(true)} style={styles.footerCol}>
-            <Text style={[styles.footerText, { color: colors.text }]}>
-              {selectedHour}:{selectedMinute.toString().padStart(2, '0')} {selectedPeriod}
-            </Text>
+          <TouchableOpacity 
+            style={[styles.actionButton, styles.saveActionButton, { backgroundColor: colors.primary }]} 
+            onPress={handleSave}
+          >
+            <Text style={[styles.actionButtonText, { color: '#FFFFFF' }]}>SAVE</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -594,20 +621,32 @@ export function AddTransactionModal({ visible, onClose, defaultAccount, transact
         >
           <View style={[styles.pickerCard, { backgroundColor: colors.card }]}>
             <Text style={[styles.pickerTitle, { color: colors.text }]}>Select Account</Text>
-            {dbAccounts.map((acc) => (
-              <TouchableOpacity
-                key={acc}
-                style={[styles.pickerOption, { borderBottomColor: colors.divider }]}
-                onPress={() => {
-                  if (pickerType === 'account') setAccount(acc);
-                  if (pickerType === 'fromAccount') setFromAccount(acc);
-                  if (pickerType === 'toAccount') setToAccount(acc);
-                  setShowAccountPicker(false);
-                }}
-              >
-                <Text style={[styles.pickerOptionText, { color: colors.text }]}>{acc}</Text>
-              </TouchableOpacity>
-            ))}
+            {dbAccounts.length === 0 ? (
+              <View style={{ paddingVertical: 24, alignItems: 'center' }}>
+                <Ionicons name="alert-circle-outline" size={36} color="#FF6B6B" style={{ marginBottom: 8 }} />
+                <Text style={{ color: colors.text, textAlign: 'center', fontSize: 15, fontWeight: '600' }}>
+                  No Accounts Found
+                </Text>
+                <Text style={{ color: colors.textSecondary, textAlign: 'center', fontSize: 13, marginTop: 4, paddingHorizontal: 16 }}>
+                  Please close this modal and add an account under the Accounts tab first.
+                </Text>
+              </View>
+            ) : (
+              dbAccounts.map((acc) => (
+                <TouchableOpacity
+                  key={acc}
+                  style={[styles.pickerOption, { borderBottomColor: colors.divider }]}
+                  onPress={() => {
+                    if (pickerType === 'account') setAccount(acc);
+                    if (pickerType === 'fromAccount') setFromAccount(acc);
+                    if (pickerType === 'toAccount') setToAccount(acc);
+                    setShowAccountPicker(false);
+                  }}
+                >
+                  <Text style={[styles.pickerOptionText, { color: colors.text }]}>{acc}</Text>
+                </TouchableOpacity>
+              ))
+            )}
           </View>
         </TouchableOpacity>
       </Modal>
@@ -622,20 +661,32 @@ export function AddTransactionModal({ visible, onClose, defaultAccount, transact
           <View style={[styles.pickerCard, { backgroundColor: colors.card }]}>
             <Text style={[styles.pickerTitle, { color: colors.text }]}>Select Category</Text>
             <ScrollView style={{ maxHeight: 300 }}>
-              {dbCategories
-                .filter(c => c.type === activeTab)
-                .map((cat) => (
-                  <TouchableOpacity
-                    key={cat.id}
-                    style={[styles.pickerOption, { borderBottomColor: colors.divider }]}
-                    onPress={() => {
-                      setCategory(cat.name);
-                      setShowCategoryPicker(false);
-                    }}
-                  >
-                    <Text style={[styles.pickerOptionText, { color: colors.text }]}>{cat.name}</Text>
-                  </TouchableOpacity>
-                ))}
+              {dbCategories.filter(c => c.type === activeTab).length === 0 ? (
+                <View style={{ paddingVertical: 24, alignItems: 'center' }}>
+                  <Ionicons name="alert-circle-outline" size={36} color="#FF6B6B" style={{ marginBottom: 8 }} />
+                  <Text style={{ color: colors.text, textAlign: 'center', fontSize: 15, fontWeight: '600' }}>
+                    No Categories Found
+                  </Text>
+                  <Text style={{ color: colors.textSecondary, textAlign: 'center', fontSize: 13, marginTop: 4, paddingHorizontal: 16 }}>
+                    No categories found for {activeTab}. Please add a category under Settings first.
+                  </Text>
+                </View>
+              ) : (
+                dbCategories
+                  .filter(c => c.type === activeTab)
+                  .map((cat) => (
+                    <TouchableOpacity
+                      key={cat.id}
+                      style={[styles.pickerOption, { borderBottomColor: colors.divider }]}
+                      onPress={() => {
+                        setCategory(cat.name);
+                        setShowCategoryPicker(false);
+                      }}
+                    >
+                      <Text style={[styles.pickerOptionText, { color: colors.text }]}>{cat.name}</Text>
+                    </TouchableOpacity>
+                  ))
+              )}
             </ScrollView>
           </View>
         </TouchableOpacity>
@@ -695,8 +746,6 @@ export function AddTransactionModal({ visible, onClose, defaultAccount, transact
       <Modal visible={showTimePicker} transparent animationType="fade" onRequestClose={() => setShowTimePicker(false)}>
         <View style={styles.pickerOverlay}>
           <View style={[styles.setTimeCard, { backgroundColor: colors.card }]}>
-
-
             {/* Analog Clock */}
             <View style={styles.setTimeClockArea}>
               <View style={[
@@ -704,7 +753,6 @@ export function AddTransactionModal({ visible, onClose, defaultAccount, transact
                 { borderColor: isDarkMode ? '#2ED8A5' : '#00684F', backgroundColor: isDarkMode ? '#1A2E2B' : '#F4FAF8' }
               ]}>
                 <View style={styles.setTimeClockFace} {...clockPanResponder.panHandlers}>
-
                   {/* Tick marks */}
                   {Array.from({ length: 60 }).map((_, i) => {
                     const isHourTick = i % 5 === 0;
@@ -893,18 +941,23 @@ const styles = StyleSheet.create({
     right: 0,
     paddingHorizontal: 16,
     paddingTop: Platform.OS === 'ios' ? 52 : 48,
-    paddingBottom: Platform.OS === 'ios' ? 44 : 70,
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     paddingVertical: 12,
     marginBottom: 8,
   },
-  headerBtnText: {
-    fontSize: 16,
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  sectionLabel: {
+    fontSize: 12,
     fontWeight: '700',
-    color: '#FFB300', // Gold/yellow color matching screenshot Cancel/Save
+    marginBottom: 6,
+    textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   tabsContainer: {
@@ -934,35 +987,37 @@ const styles = StyleSheet.create({
   selectorCol: {
     flex: 1,
   },
+  fullWidthSelector: {
+    width: '100%',
+    marginBottom: 14,
+  },
   selectorLabel: {
     fontSize: 12,
     fontWeight: '600',
     marginBottom: 6,
-    textAlign: 'center',
   },
   selectorButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     borderWidth: 1,
     borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    gap: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    gap: 8,
   },
   selectorValueText: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
-    maxWidth: '78%',
+    maxWidth: '85%',
   },
   notesInput: {
     borderWidth: 1,
     borderRadius: 10,
     padding: 12,
     fontSize: 15,
-    height: 80,
+    height: 70,
     textAlignVertical: 'top',
-    marginBottom: 14,
+    marginBottom: 16,
   },
   calcOutputContainer: {
     flexDirection: 'row',
@@ -972,7 +1027,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    marginBottom: 14,
+    marginBottom: 10,
   },
   calcExprText: {
     fontSize: 32,
@@ -984,16 +1039,16 @@ const styles = StyleSheet.create({
   },
   keypadGrid: {
     flexDirection: 'column',
-    gap: 8,
+    gap: 6,
     marginBottom: 16,
   },
   keypadRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
   },
   keypadBtn: {
     flex: 1,
-    height: 60,
+    height: 52,
     borderRadius: 8,
     borderWidth: 1,
     justifyContent: 'center',
@@ -1003,108 +1058,12 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '600',
   },
-  footerRow: {
-    flexDirection: 'row',
-    borderTopWidth: 1,
-    paddingTop: 12,
-    alignItems: 'center',
-  },
-  footerCol: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  footerText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  footerDivider: {
-    width: 1,
-    height: 18,
-  },
   pickerOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.3)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  setTimeCard: {
-    width: width * 0.85,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  setTimeHeader: {
-    padding: 20,
-  },
-  setTimeHeaderLabel: {
-    color: 'rgba(255,255,255,0.75)',
-    fontSize: 13,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  setTimeHeaderTime: {
-    color: '#FFFFFF',
-    fontSize: 30,
-    fontWeight: '700',
-  },
-  setTimeClockArea: {
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 12,
-  },
-  setTimeClockOuter: {
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-    borderWidth: 5,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  setTimeClockFace: {
-    width: 210,
-    height: 210,
-    borderRadius: 105,
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  setTimeSpinnersRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    gap: 4,
-  },
-  setTimeSpinnerBox: {
-    alignItems: 'center',
-    gap: 2,
-  },
-  setTimeSpinnerArrow: {
-    padding: 4,
-  },
-  setTimeSpinnerValueBox: {
-    width: 60,
-    height: 44,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-  },
-  setTimeSpinnerValue: {
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  setTimeSpinnerColon: {
-    fontSize: 24,
-    fontWeight: '700',
-    marginHorizontal: 4,
-    marginTop: -4,
-  },
-  setTimeConfirmBtn: {},
-  setTimeConfirmText: {},
-  setTimeCancelText: {},
   pickerCard: {
     width: width * 0.8,
     borderRadius: 16,
@@ -1221,115 +1180,107 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.5,
   },
-  customTimePickerCard: {
+  bottomActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'ios' ? 32 : 44,
+    borderTopWidth: 1,
+    gap: 12,
+  },
+  actionButton: {
+    flex: 1,
+    height: 50,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cancelActionButton: {
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  saveActionButton: {},
+  actionButtonText: {
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  setTimeCard: {
     width: width * 0.85,
-    backgroundColor: '#323232',
     borderRadius: 8,
-    paddingTop: 20,
     overflow: 'hidden',
   },
-  customTimePickerHeader: {
+  setTimeHeader: {
+    padding: 20,
+  },
+  setTimeHeaderLabel: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  setTimeHeaderTime: {
+    color: '#FFFFFF',
+    fontSize: 30,
+    fontWeight: '700',
+  },
+  setTimeClockArea: {
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+  },
+  setTimeClockOuter: {
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    borderWidth: 5,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  setTimeClockFace: {
+    width: 210,
+    height: 210,
+    borderRadius: 105,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  setTimeSpinnersRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 24,
-    marginBottom: 20,
-    gap: 12,
-  },
-  customTimePickerTimeText: {
-    fontSize: 48,
-    fontWeight: '700',
-    color: '#2ED8A5',
-  },
-  customTimePickerAmPm: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
     gap: 4,
   },
-  customTimePickerAmPmText: {
-    color: '#888888',
-    fontSize: 14,
+  setTimeSpinnerBox: {
+    alignItems: 'center',
+    gap: 2,
+  },
+  setTimeSpinnerArrow: {
+    padding: 4,
+  },
+  setTimeSpinnerValueBox: {
+    width: 60,
+    height: 44,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  setTimeSpinnerValue: {
+    fontSize: 20,
     fontWeight: '700',
   },
-  customTimePickerAmPmActive: {
-    color: '#2ED8A5',
-  },
-  clockContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 24,
-  },
-  clockCircle: {
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: '#2A2A2A',
-    position: 'relative',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  clockCenterDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#2ED8A5',
-    zIndex: 5,
-  },
-  clockHandHour: {
-    position: 'absolute',
-    height: 48,
-    width: 4,
-    bottom: '50%',
-    left: '50%',
-    marginLeft: -2,
-    zIndex: 3,
-    transformOrigin: 'bottom center',
-  },
-  clockHandHourLine: {
-    flex: 1,
-    backgroundColor: '#2ED8A5',
-    opacity: 0.75,
-  },
-  clockHand: {
-    position: 'absolute',
-    height: 76,
-    width: 2,
-    bottom: '50%',
-    left: '50%',
-    marginLeft: -1,
-    zIndex: 4,
-    transformOrigin: 'bottom center',
-  },
-  clockHandLine: {
-    flex: 1,
-    backgroundColor: '#2ED8A5',
-  },
-  clockHandSelectionCircle: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#FFB300',
-    position: 'absolute',
-    top: -12,
-    left: -11,
-  },
-  clockHourBtn: {
-    position: 'absolute',
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 16,
-    zIndex: 6,
-  },
-  clockHourBtnActive: {
-    backgroundColor: '#2ED8A5',
-  },
-  clockHourText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  clockHourTextActive: {
-    color: '#000000',
+  setTimeSpinnerColon: {
+    fontSize: 24,
     fontWeight: '700',
+    marginHorizontal: 4,
+    marginTop: -4,
   },
+  setTimeConfirmBtn: {},
+  setTimeConfirmText: {},
+  setTimeCancelText: {},
 });

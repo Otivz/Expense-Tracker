@@ -494,7 +494,20 @@ export const VaultScreen: React.FC = () => {
                   </View>
                   <TouchableOpacity
                     style={styles.deleteButton}
-                    onPress={() => deleteAccount(account.id)}
+                    onPress={() => {
+                      Alert.alert(
+                        'Remove Account',
+                        `Remove "${account.name}" from this device? This only removes the local vault entry — your data stays safe.`,
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Remove',
+                            style: 'destructive',
+                            onPress: () => deleteAccount(account.id),
+                          },
+                        ]
+                      );
+                    }}
                   >
                     <Text style={styles.removeAccountText}>Remove</Text>
                   </TouchableOpacity>
