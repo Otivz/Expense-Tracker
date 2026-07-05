@@ -160,12 +160,6 @@ export default function AccountsScreen() {
       }
       setModalVisible(false);
       await loadAccounts();
-      
-      // Notify user of successful save
-      const message = editingAccount 
-        ? `Account "${trimmedName}" was successfully updated.`
-        : `Account "${trimmedName}" was successfully created.`;
-      await sendLocalNotification('Account Saved 💾', message);
     } catch (err) {
       console.error('Failed to save account:', err);
       Alert.alert('Error', 'An error occurred while saving the account.');

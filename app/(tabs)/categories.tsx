@@ -118,11 +118,6 @@ export default function CategoriesScreen() {
       setSelectedIcon('basket');
       setSelectedColor('#00684F');
       await loadCategories();
-
-      const message = editingCategoryId
-        ? `Category "${trimmedName}" was successfully updated.`
-        : `Category "${trimmedName}" was successfully created.`;
-      await sendLocalNotification('Category Saved 🏷️', message);
     } catch (err) {
       console.error('Failed to save category:', err);
       Alert.alert('Error', 'An error occurred while saving the category. Make sure the name is unique.');
@@ -142,7 +137,6 @@ export default function CategoriesScreen() {
             try {
               await categoryRepository.delete(id);
               await loadCategories();
-              await sendLocalNotification('Category Removed 🗑️', `Category "${name}" was successfully removed.`);
             } catch (err) {
               console.error('Failed to delete category:', err);
               Alert.alert('Error', 'Failed to remove category.');

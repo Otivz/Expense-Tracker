@@ -258,7 +258,6 @@ export default function BudgetsScreen() {
       setModalVisible(false);
       setLimitInput('');
       await loadBudgets();
-      await sendLocalNotification('Budget Saved 🎯', `Budget of ₱${parsedLimit.toFixed(2)} was saved for "${selectedCategory}".`);
     } catch (err) {
       console.error('Failed to save budget:', err);
       Alert.alert('Error', 'An error occurred while saving the budget. Please make sure the category exists.');
@@ -280,7 +279,6 @@ export default function BudgetsScreen() {
               const activeYear = currentDate.getFullYear();
               await budgetRepository.delete(userId, category, activeMonth, activeYear);
               await loadBudgets();
-              await sendLocalNotification('Budget Removed 🗑️', `Budget for "${category}" was removed.`);
             } catch (err) {
               console.error('Failed to delete budget:', err);
               Alert.alert('Error', 'Failed to remove budget.');
