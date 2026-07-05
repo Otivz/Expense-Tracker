@@ -28,16 +28,20 @@ This document details the technologies, packages, databases, and frameworks used
 _________________________________________________________________________________________________________________________
 
 
-## 3. Backend & Database (Supabase)
-We use **Supabase** (an open-source Firebase alternative) to power the app's backend:
-*   **PostgreSQL Database**: Relational database to store user transactions, categories, budgets, and savings goals with full schema integrity.
-*   **Supabase Auth**: Secure user authentication (email/password login, signups, and session management).
-*   **Row Level Security (RLS)**: Enforces security rules at the database level to ensure users can only access their own financial data.
-*   **Supabase Storage** (Optional): Used if users need to upload and store receipts or profile images.
+## 3. Database & Backend Architecture
+We use a hybrid local-first architecture combining local storage with cloud synchronization:
+*   **Local Database (`expo-sqlite` v16.0.10)**: Fast, offline-first relational database on the device storing user transactions, categories, budgets, and savings goals.
+*   **Secure Storage (`expo-secure-store` v15.0.8)**: Used to encrypt and securely store sensitive authentication tokens and passcode settings.
+*   **Local Authentication (`expo-local-authentication` v17.0.8)**: Enables biometric security (Face ID / Fingerprint) to unlock the app's vault.
+*   **Cloud Backend (Supabase v2.110.0)**: Used as the synchronization and backup backend.
+    *   **PostgreSQL Database**: Holds cloud copies of the database tables.
+    *   **Supabase Auth**: Manages users, credentials, and cloud sessions.
+    *   **Row Level Security (RLS)**: Enforces server-side constraints to secure private financial records.
 
-## 4. Build Tooling & Development
+## 4. Build Tooling & Deployment
 *   **TypeScript (v5.9.2)**: Static typing and autocomplete support.
-*   **Metro Bundler**: The compiler/packager for React Native.
+*   **EAS Build (Expo Application Services)**: Cloud service used to package the app into a standalone `.apk` for Android or `.ipa` for iOS.
+*   **Metro Bundler**: The packager/compiler for React Native.
 *   **ESLint**: Integrated linting for code quality checks.
 
 ## 5. Design System (Color Palette)
@@ -54,12 +58,15 @@ We use **Supabase** (an open-source Firebase alternative) to power the app's bac
 | **Text Primary** | `#1C2A27` | Body headers, numbers, and main readable text |
 | **Text Secondary** | `#6B7B77` | Muted captions, helper texts, and inactive states |
 
+## 6. Data Synchronization Flow
+```
 User
-   ↓
-C-Vault App
-   ↓
-SQLite (Local Database)
-   ↓
+  ↓
+Expense Tracker App
+  ↓
+expo-sqlite (Local Database)
+  ↓
 Sync Manager
-   ↓
-Supabase Cloud
+  ↓
+Supabase Cloud (PostgreSQL Backend)
+```
