@@ -1,5 +1,6 @@
 import { userRepository } from '@/db/repositories/userRepository';
 import { sha256 } from '@/utils/hash';
+import { supabase, isSupabaseConfigured } from '@/utils/supabase';
 import * as Haptics from 'expo-haptics';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
@@ -154,6 +155,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCurrentAccount(account);
     setFailedAttempts(0);
     setIsLockedOut(false);
+    setIsUnlocked(false);
 
     if (account) {
       // Auto-set combination 10-20-30-40 for the demo account (ensure it is initialized every selection/redirect)
@@ -180,7 +182,7 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-  const addAccount = async (user: { id: string; email: string; name: string }): Promise<VaultAccount> => {
+  const addAccount = async (user: { id: string; email: string; name: string; vaultCombination?: number[] }): Promise<VaultAccount> => {
     // Check if account already exists
     const existing = accounts.find((a) => a.id === user.id || a.email.toLowerCase() === user.email.toLowerCase());
 
@@ -203,9 +205,9 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
     }
 
-    // Auto-set combination 10-20-30-40 for the demo account (ensure it is initialized every login)
-    if (user.id === 'demo-user-id') {
-      const combination = [10, 20, 30, 40];
+    // Restore combination if present in metadata (for sync across multiple devices)
+    if (user.vaultCombination && Array.isArray(user.vaultCombination)) {
+      const combination = user.vaultCombination;
       const comboString = combination.join(',');
       const hash = sha256(comboString);
       await setItemSecure(`${COMBINATION_PREFIX}${updatedAccount.id}`, hash);
@@ -300,6 +302,22 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       console.log('Vault combination hash saved to SQLite for user:', currentAccount.id);
     } catch (dbErr) {
       console.error('Failed to update vault combination in SQLite:', dbErr);
+    }
+
+    // Sync to Supabase user metadata (for multi-device sync)
+    try {
+      if (isSupabaseConfigured && supabase) {
+        const { error } = await supabase.auth.updateUser({
+          data: { vault_combination: combination }
+        });
+        if (error) {
+          console.error('Failed to sync combination to Supabase metadata:', error.message);
+        } else {
+          console.log('Vault combination successfully synced to Supabase metadata.');
+        }
+      }
+    } catch (supabaseErr) {
+      console.error('Failed to sync combination to Supabase:', supabaseErr);
     }
 
     setNeedsComboSetup(false);

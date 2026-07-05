@@ -1,9 +1,10 @@
 import { useVault, VaultAccount } from '@/context/vault-context';
-import { signInWithEmail, signUpWithEmail, sendPasswordResetEmail } from '@/utils/supabase';
+import { isSupabaseConfigured, sendOtpCode, signInWithEmail, signUpWithEmail, verifyOtpCode } from '@/utils/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import React, { useCallback, useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -12,7 +13,6 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-  Alert,
 } from 'react-native';
 import Animated, {
   Easing,
@@ -58,6 +58,9 @@ export const VaultScreen: React.FC = () => {
   const [authLoading, setAuthLoading] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
   const [resetError, setResetError] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpLoading, setOtpLoading] = useState(false);
 
   // Combination State
   const [dialNumber, setDialNumber] = useState(0);
@@ -323,39 +326,18 @@ export const VaultScreen: React.FC = () => {
     }
   };
 
-  const handleDemoLogin = async () => {
-    setAuthError('');
-    setAuthLoading(true);
-    try {
-      const demoUser = {
-        id: 'demo-user-id',
-        email: 'demo@example.com',
-        name: 'Demo Account',
-      };
-      const account = await addAccount(demoUser);
 
-      // Clear inputs
-      setEmail('');
-      setPassword('');
-      setName('');
-
-      // Select new account and check combo setup status
-      handleSelectAccount(account);
-    } catch (e: any) {
-      setAuthError(e.message || 'Demo Mode initiation failed.');
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    } finally {
-      setAuthLoading(false);
-    }
-  };
 
   const handleForgotCombination = () => {
     setResetEmail('');
     setResetError('');
+    setOtpCode('');
+    setOtpSent(false);
+    setOtpLoading(false);
     setViewState('forgot');
   };
 
-  const handleResetSubmit = () => {
+  const handleResetSubmit = async () => {
     setResetError('');
     if (!resetEmail.trim()) {
       setResetError('Email address is required.');
@@ -367,31 +349,86 @@ export const VaultScreen: React.FC = () => {
     if (resetEmail.trim().toLowerCase() !== currentAccount.email.toLowerCase()) {
       setResetError('Email address does not match this vault owner.');
       if (Platform.OS !== 'web') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => { });
       }
       return;
     }
 
-    // Email matches!
-    if (Platform.OS !== 'web') {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    if (!isSupabaseConfigured) {
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => { });
+      }
+      Alert.alert(
+        'Offline Reset',
+        'Offline Mode: Ownership verified. Press OK to configure a new combination.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              setEnteredCombo([]);
+              setDialNumber(0);
+              dialRotation.value = 0;
+              setViewState('setup');
+            },
+          },
+        ]
+      );
+      return;
     }
 
-    Alert.alert(
-      'Identity Verified',
-      `Ownership verified. A reset request has been notified to:\n\n${currentAccount.email}\n\nPress OK to configure a new vault combination.`,
-      [
-        {
-          text: 'OK',
-          onPress: () => {
-            setEnteredCombo([]);
-            setDialNumber(0);
-            dialRotation.value = 0;
-            setViewState('setup');
+    setOtpLoading(true);
+    try {
+      await sendOtpCode(resetEmail);
+      setOtpSent(true);
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => { });
+      }
+    } catch (e: any) {
+      setResetError(e.message || 'Failed to send verification code. Please try again.');
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => { });
+      }
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleVerifyResetOtp = async () => {
+    setResetError('');
+    if (otpCode.length < 6) {
+      setResetError('Please enter the 6-digit verification code.');
+      return;
+    }
+
+    setOtpLoading(true);
+    try {
+      await verifyOtpCode(resetEmail, otpCode);
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => { });
+      }
+      Alert.alert(
+        'Identity Verified',
+        'Your identity has been verified via Supabase. Press OK to configure a new vault combination.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              setEnteredCombo([]);
+              setDialNumber(0);
+              dialRotation.value = 0;
+              setViewState('setup');
+            },
           },
-        },
-      ]
-    );
+        ]
+      );
+    } catch (e: any) {
+      setResetError(e.message || 'Incorrect verification code. Please try again.');
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => { });
+      }
+    } finally {
+      setOtpLoading(false);
+    }
   };
 
   // Animated styles
@@ -459,7 +496,7 @@ export const VaultScreen: React.FC = () => {
                     style={styles.deleteButton}
                     onPress={() => deleteAccount(account.id)}
                   >
-                    <Ionicons name="trash-outline" size={18} color="#A8B3AF" />
+                    <Text style={styles.removeAccountText}>Remove</Text>
                   </TouchableOpacity>
                 </View>
               </TouchableOpacity>
@@ -551,18 +588,7 @@ export const VaultScreen: React.FC = () => {
             </Text>
           </TouchableOpacity>
 
-          <View style={{ height: 1, backgroundColor: '#2ED8A5', opacity: 0.15, marginVertical: 16 }} />
 
-          <TouchableOpacity
-            style={[styles.submitButton, { backgroundColor: '#132822', borderColor: '#2ED8A5', borderWidth: 1 }]}
-            activeOpacity={0.8}
-            onPress={handleDemoLogin}
-            disabled={authLoading}
-          >
-            <Text style={[styles.submitButtonText, { color: '#2ED8A5' }]}>
-              Access with Demo Account (No Database)
-            </Text>
-          </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
     );
@@ -573,10 +599,10 @@ export const VaultScreen: React.FC = () => {
       <View style={styles.loadingContainer}>
         <Text style={styles.brandTitleLoading}>C-VAULT</Text>
         <Text style={styles.loadingText}>Loading Your Vault...</Text>
-        
+
         <View style={[styles.dialWrapper, { marginBottom: 30 }]}>
           <CombinationDial
-            onNumberChange={() => {}}
+            onNumberChange={() => { }}
             isLockedOut={true}
             value={loadingRotation}
           />
@@ -589,15 +615,19 @@ export const VaultScreen: React.FC = () => {
 
   const renderCombinationSetup = () => {
     return (
-      <View style={styles.lockContainer}>
-        <View style={styles.headerArea}>
+      <ScrollView
+        style={styles.scrollViewContainer}
+        contentContainerStyle={styles.scrollViewContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={[styles.headerArea, { marginTop: Platform.OS === 'ios' ? 70 : 50, marginBottom: 12 }]}>
           <Text style={styles.brandTitle}>C-VAULT</Text>
           <Text style={styles.mainTitle}>Setup Combination</Text>
           <Text style={styles.subtitle}>Choose 4 numbers to secure your mechanical safe.</Text>
         </View>
 
         {/* Combination Setup Progress Dots */}
-        <View style={styles.progressDotsRow}>
+        <View style={[styles.progressDotsRow, { marginVertical: 12 }]}>
           {Array.from({ length: 4 }).map((_, idx) => (
             <View
               key={`dot-${idx}`}
@@ -609,25 +639,27 @@ export const VaultScreen: React.FC = () => {
           ))}
         </View>
 
-        <View style={styles.liveNumberContainer}>
+        <View style={[styles.liveNumberContainer, { marginBottom: 10 }]}>
           <Text style={styles.liveNumberLabel}>Current Setting</Text>
           <Text style={styles.liveNumber}>{dialNumber.toString().padStart(2, '0')}</Text>
         </View>
 
         <Text style={styles.hintText}>{statusMessage}</Text>
 
-        <Animated.View style={[styles.dialWrapper, animatedDialWrapperStyle, glowBorderColorStyle]}>
+        <Animated.View style={[styles.dialWrapper, { marginBottom: 30 }, animatedDialWrapperStyle, glowBorderColorStyle]}>
           <CombinationDial
             onNumberChange={(num) => {
               setDialNumber(num);
-              setHasInteracted(true);
+              if (isDialActive) {
+                setHasInteracted(true);
+              }
             }}
             onInteractionChange={setIsDialActive}
             isLockedOut={false}
             value={dialRotation}
           />
         </Animated.View>
-      </View>
+      </ScrollView>
     );
   };
 
@@ -635,27 +667,31 @@ export const VaultScreen: React.FC = () => {
     const isLocked = isLockedOut;
 
     return (
-      <View style={styles.lockContainer}>
-        <TouchableOpacity
-          style={styles.backToAccountsButton}
-          onPress={() => selectAccount(null)}
-        >
-          <Ionicons name="arrow-back" size={20} color="#A8B3AF" />
-          <Text style={styles.backToAccountsText}>Switch Account</Text>
-        </TouchableOpacity>
+      <ScrollView
+        style={styles.scrollViewContainer}
+        contentContainerStyle={styles.scrollViewContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.topNavigationRow}>
+          <TouchableOpacity
+            style={styles.backToAccountsButtonNonAbsolute}
+            onPress={() => selectAccount(null)}
+          >
+            <Ionicons name="arrow-back" size={20} color="#A8B3AF" />
+            <Text style={styles.backToAccountsText}>Switch Account</Text>
+          </TouchableOpacity>
+        </View>
 
-        <View style={styles.headerArea}>
+        <View style={[styles.headerArea, { marginTop: 12, marginBottom: 12 }]}>
           <Text style={styles.brandTitle}>C-VAULT</Text>
           <Text style={styles.mainTitle}>Unlock Your Vault</Text>
           <Text style={styles.subtitle}>
-            {currentAccount?.id === 'demo-user-id'
-              ? 'Demo Combination: 10 - 20 - 30 - 40'
-              : 'Rotate the dial to enter the security combination.'}
+            Rotate the dial to enter the security combination.
           </Text>
         </View>
 
         {/* Combination Dots */}
-        <View style={styles.progressDotsRow}>
+        <View style={[styles.progressDotsRow, { marginVertical: 12 }]}>
           {Array.from({ length: 4 }).map((_, idx) => (
             <View
               key={`dot-${idx}`}
@@ -668,7 +704,7 @@ export const VaultScreen: React.FC = () => {
           ))}
         </View>
 
-        <Animated.View style={[styles.liveNumberContainer, animatedLiveNumberStyle]}>
+        <Animated.View style={[styles.liveNumberContainer, { marginBottom: 10 }, animatedLiveNumberStyle]}>
           <Text style={styles.liveNumberLabel}>Dial Number</Text>
           <Text style={[styles.liveNumber, comboError && styles.liveNumberError]}>
             {dialNumber.toString().padStart(2, '0')}
@@ -688,11 +724,13 @@ export const VaultScreen: React.FC = () => {
             </Text>
           </View>
         ) : (
-          <Animated.View style={[styles.dialWrapper, animatedDialWrapperStyle, glowBorderColorStyle]}>
+          <Animated.View style={[styles.dialWrapper, { marginBottom: 10 }, animatedDialWrapperStyle, glowBorderColorStyle]}>
             <CombinationDial
               onNumberChange={(num) => {
                 setDialNumber(num);
-                setHasInteracted(true);
+                if (isDialActive) {
+                  setHasInteracted(true);
+                }
               }}
               onInteractionChange={setIsDialActive}
               isLockedOut={isLocked}
@@ -703,10 +741,10 @@ export const VaultScreen: React.FC = () => {
 
         {currentAccount?.biometricsEnabled && hasBiometricsSupport && (
           <TouchableOpacity
-            style={styles.biometricsShortcut}
+            style={[styles.biometricsShortcut, { marginTop: 12 }]}
             onPress={() => attemptBiometrics()}
           >
-            <Ionicons name="finger-print" size={24} color="#2ED8A5" />
+            <Ionicons name="finger-print" size={24} color="#2ED8A5" style={{ marginRight: 8 }} />
             <Text style={styles.biometricsShortcutText}>Unlock with {biometryType}</Text>
           </TouchableOpacity>
         )}
@@ -718,7 +756,7 @@ export const VaultScreen: React.FC = () => {
         >
           <Text style={styles.forgotButtonText}>Forgot Combination?</Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
     );
   };
 
@@ -730,7 +768,15 @@ export const VaultScreen: React.FC = () => {
       >
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => setViewState('combo')}
+          onPress={() => {
+            if (otpSent) {
+              setOtpSent(false);
+              setOtpCode('');
+              setResetError('');
+            } else {
+              setViewState('combo');
+            }
+          }}
         >
           <Ionicons name="chevron-back" size={24} color="#FFF" />
           <Text style={{ color: '#FFF', fontSize: 16 }}>Back</Text>
@@ -738,30 +784,78 @@ export const VaultScreen: React.FC = () => {
 
         <View style={styles.headerArea}>
           <Text style={styles.brandTitle}>C-VAULT</Text>
-          <Text style={styles.mainTitle}>Verify Owner</Text>
-          <Text style={styles.subtitle}>Enter the email linked to this vault to reset combination.</Text>
+          <Text style={styles.mainTitle}>{otpSent ? 'Enter Code' : 'Verify Owner'}</Text>
+          <Text style={styles.subtitle}>
+            {otpSent
+              ? `Enter the 6-digit code sent to ${resetEmail}.`
+              : 'Enter the email linked to this vault to reset combination.'}
+          </Text>
         </View>
 
         <View style={styles.formContainer}>
           {resetError ? <Text style={styles.errorText}>{resetError}</Text> : null}
 
-          <TextInput
-            style={styles.input}
-            placeholder="Registered Email Address"
-            placeholderTextColor="#A8B3AF"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            value={resetEmail}
-            onChangeText={setResetEmail}
-          />
+          {!otpSent ? (
+            <>
+              <TextInput
+                style={styles.input}
+                placeholder="Registered Email Address"
+                placeholderTextColor="#A8B3AF"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                value={resetEmail}
+                onChangeText={setResetEmail}
+                editable={!otpLoading}
+              />
 
-          <TouchableOpacity
-            style={styles.submitButton}
-            activeOpacity={0.8}
-            onPress={handleResetSubmit}
-          >
-            <Text style={styles.submitButtonText}>Reset Combination</Text>
-          </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.submitButton}
+                activeOpacity={0.8}
+                onPress={handleResetSubmit}
+                disabled={otpLoading}
+              >
+                <Text style={styles.submitButtonText}>
+                  {otpLoading ? 'Sending...' : 'Send Verification Code'}
+                </Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TextInput
+                style={styles.input}
+                placeholder="6-Digit Code"
+                placeholderTextColor="#A8B3AF"
+                keyboardType="number-pad"
+                maxLength={6}
+                value={otpCode}
+                onChangeText={setOtpCode}
+                editable={!otpLoading}
+              />
+
+              <TouchableOpacity
+                style={styles.submitButton}
+                activeOpacity={0.8}
+                onPress={handleVerifyResetOtp}
+                disabled={otpLoading}
+              >
+                <Text style={styles.submitButtonText}>
+                  {otpLoading ? 'Verifying...' : 'Verify & Reset Dial'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.switchAuthType}
+                onPress={() => {
+                  setOtpSent(false);
+                  setOtpCode('');
+                  setResetError('');
+                }}
+                disabled={otpLoading}
+              >
+                <Text style={styles.switchAuthTypeText}>Change Email Address</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       </KeyboardAvoidingView>
     );
@@ -881,6 +975,11 @@ const styles = StyleSheet.create({
   },
   deleteButton: {
     padding: 8,
+  },
+  removeAccountText: {
+    color: '#FF6B6B',
+    fontSize: 12,
+    fontWeight: '600',
   },
   addAccountButton: {
     flexDirection: 'row',
@@ -1012,6 +1111,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
+  scrollViewContainer: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  scrollViewContent: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+  },
+  topNavigationRow: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    marginTop: Platform.OS === 'ios' ? 64 : 55,
+    marginBottom: 8,
+  },
+  backToAccountsButtonNonAbsolute: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   backToAccountsButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1118,6 +1239,7 @@ const styles = StyleSheet.create({
   },
   forgotButton: {
     marginTop: 12,
+    marginBottom: 100,
     paddingVertical: 8,
     paddingHorizontal: 16,
   },
