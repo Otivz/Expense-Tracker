@@ -64,10 +64,27 @@ Press **`w`** in the terminal where Expo is running, or go to [http://localhost:
 
 ## 6. Project Structure Overview
 *   **`app/`**: Contains the application screen files (using file-based routing).
-    *   `app/(tabs)/`: Contains the main tab screens (e.g., `index.tsx`, `explore.tsx`).
-    *   `app/+not-found.tsx`: Fallback screen for broken/unrecognized links.
-    *   `app/_layout.tsx`: Root layout configuration.
+	*   `app/(tabs)/`: Contains the main tab screens (e.g., `index.tsx`, `explore.tsx`).
+	*   `app/+not-found.tsx`: Fallback screen for broken/unrecognized links.
+	*   `app/_layout.tsx`: Root layout configuration.
 *   **`components/`**: Reusable UI components.
 *   **`constants/`**: Design tokens, colors, and layout constants.
 *   **`hooks/`**: Custom React hooks.
 *   **`scripts/reset-project.js`**: Run `npm run reset-project` to move the starter template files to `app-example` and start with a fresh blank canvas.
+
+---
+
+## 7. Building a Standalone Android APK
+
+To generate a shareable, installable APK file for Android devices using EAS Build, run:
+
+```bash
+eas build --platform android --profile preview
+```
+
+### What this command does:
+1. **Triggers EAS Build**: Connects to Expo Application Services (EAS) to build the app in the cloud.
+2. **Targets Android**: The `--platform android` flag tells EAS to compile a build specific to Android.
+3. **Uses the "Preview" Profile**: The `--profile preview` flag tells EAS to build an APK file (based on the `eas.json` configuration) rather than an `.aab` (Android App Bundle) which is only meant for Google Play Store submission.
+4. **Produces an Installable Output**: Generates an `.apk` file that can be side-loaded directly onto any Android device, along with a QR code to download and install it immediately.
+
