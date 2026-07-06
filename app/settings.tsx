@@ -20,6 +20,7 @@ import { useTheme } from '@/context/theme-context';
 import * as SecureStore from 'expo-secure-store';
 import { useVault } from '@/context/vault-context';
 import { CombinationDial } from '@/components/vault/combination-dial';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as Haptics from 'expo-haptics';
 import Animated, {
   useSharedValue,
@@ -696,102 +697,104 @@ export default function SettingsScreen() {
         animationType="slide"
         onRequestClose={closeChangeComboModal}
       >
-        <View style={styles.changeComboModalContainer}>
-          {/* Header Area */}
-          <SafeAreaView edges={['top']}>
-            <View style={styles.changeComboHeaderRow}>
-              {changeComboStep !== 'success' && (
-                <TouchableOpacity onPress={closeChangeComboModal} style={styles.changeComboBackButton} activeOpacity={0.7}>
-                  <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
-                  <Text style={styles.changeComboBackButtonText}>Cancel</Text>
-                </TouchableOpacity>
-              )}
-              <Text style={styles.changeComboHeaderTitle}>
-                {changeComboStep === 'verify' ? 'Verify Owner' : changeComboStep === 'setup' ? 'New Combo' : 'Success'}
-              </Text>
-              <View style={{ width: 60 }} />
-            </View>
-          </SafeAreaView>
-
-          {changeComboStep !== 'success' ? (
-            <ScrollView
-              style={styles.changeComboScrollView}
-              contentContainerStyle={styles.changeComboScrollContent}
-              showsVerticalScrollIndicator={false}
-            >
-              <View style={styles.changeComboInfoBox}>
-                <Text style={styles.changeComboMainTitle}>
-                  {changeComboStep === 'verify' ? 'Enter Current Combo' : 'Setup New Combo'}
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <View style={styles.changeComboModalContainer}>
+            {/* Header Area */}
+            <SafeAreaView edges={['top']}>
+              <View style={styles.changeComboHeaderRow}>
+                {changeComboStep !== 'success' && (
+                  <TouchableOpacity onPress={closeChangeComboModal} style={styles.changeComboBackButton} activeOpacity={0.7}>
+                    <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
+                    <Text style={styles.changeComboBackButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                )}
+                <Text style={styles.changeComboHeaderTitle}>
+                  {changeComboStep === 'verify' ? 'Verify Owner' : changeComboStep === 'setup' ? 'New Combo' : 'Success'}
                 </Text>
-                <Text style={styles.changeComboSubtitle}>
-                  {changeComboStep === 'verify'
-                    ? 'Verify identity by rotating the dial to enter your active passcode.'
-                    : 'Choose 4 new numbers to secure your mechanical safe.'}
-                </Text>
+                <View style={{ width: 60 }} />
               </View>
+            </SafeAreaView>
 
-              {/* Progress Dots */}
-              <View style={styles.changeComboDotsRow}>
-                {Array.from({ length: 4 }).map((_, idx) => (
-                  <View
-                    key={`change-dot-${idx}`}
-                    style={[
-                      styles.changeComboDot,
-                      enteredCombo.length > idx && styles.changeComboDotActive,
-                      comboError && styles.changeComboDotError,
-                    ]}
-                  />
-                ))}
-              </View>
-
-              {/* Current Number Container */}
-              <Animated.View style={[styles.changeComboNumberBox, animatedLiveNumberStyle]}>
-                <Text style={styles.changeComboNumberLabel}>
-                  {changeComboStep === 'verify' ? 'Dial Number' : 'Current Setting'}
-                </Text>
-                <Text style={[styles.changeComboNumberTextVal, comboError && styles.changeComboNumberTextValError]}>
-                  {dialNumber.toString().padStart(2, '0')}
-                </Text>
-              </Animated.View>
-
-              <Text style={[styles.changeComboHintText, comboError && styles.changeComboHintTextError]}>
-                {statusMessage}
-              </Text>
-
-              {/* Combination Dial Wrapper */}
-              <Animated.View style={[styles.changeComboDialWrapper, animatedDialWrapperStyle, glowBorderColorStyle]}>
-                <CombinationDial
-                  onNumberChange={(num) => {
-                    setDialNumber(num);
-                    if (isDialActive) {
-                      setHasInteracted(true);
-                    }
-                  }}
-                  onInteractionChange={setIsDialActive}
-                  isLockedOut={false}
-                  value={dialRotation}
-                />
-              </Animated.View>
-            </ScrollView>
-          ) : (
-            <View style={styles.changeComboSuccessContainer}>
-              <View style={styles.changeComboSuccessCircle}>
-                <Ionicons name="checkmark-circle" size={80} color="#2ED8A5" />
-              </View>
-              <Text style={styles.changeComboSuccessTitle}>Passcode Updated</Text>
-              <Text style={styles.changeComboSuccessSubtitle}>
-                Your C-Vault combination has been changed successfully. Write down or remember your new combination.
-              </Text>
-              <TouchableOpacity
-                onPress={closeChangeComboModal}
-                style={styles.changeComboSuccessButton}
-                activeOpacity={0.8}
+            {changeComboStep !== 'success' ? (
+              <ScrollView
+                style={styles.changeComboScrollView}
+                contentContainerStyle={styles.changeComboScrollContent}
+                showsVerticalScrollIndicator={false}
               >
-                <Text style={styles.changeComboSuccessButtonText}>Done</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
+                <View style={styles.changeComboInfoBox}>
+                  <Text style={styles.changeComboMainTitle}>
+                    {changeComboStep === 'verify' ? 'Enter Current Combo' : 'Setup New Combo'}
+                  </Text>
+                  <Text style={styles.changeComboSubtitle}>
+                    {changeComboStep === 'verify'
+                      ? 'Verify identity by rotating the dial to enter your active passcode.'
+                      : 'Choose 4 new numbers to secure your mechanical safe.'}
+                  </Text>
+                </View>
+
+                {/* Progress Dots */}
+                <View style={styles.changeComboDotsRow}>
+                  {Array.from({ length: 4 }).map((_, idx) => (
+                    <View
+                      key={`change-dot-${idx}`}
+                      style={[
+                        styles.changeComboDot,
+                        enteredCombo.length > idx && styles.changeComboDotActive,
+                        comboError && styles.changeComboDotError,
+                      ]}
+                    />
+                  ))}
+                </View>
+
+                {/* Current Number Container */}
+                <Animated.View style={[styles.changeComboNumberBox, animatedLiveNumberStyle]}>
+                  <Text style={styles.changeComboNumberLabel}>
+                    {changeComboStep === 'verify' ? 'Dial Number' : 'Current Setting'}
+                  </Text>
+                  <Text style={[styles.changeComboNumberTextVal, comboError && styles.changeComboNumberTextValError]}>
+                    {dialNumber.toString().padStart(2, '0')}
+                  </Text>
+                </Animated.View>
+
+                <Text style={[styles.changeComboHintText, comboError && styles.changeComboHintTextError]}>
+                  {statusMessage}
+                </Text>
+
+                {/* Combination Dial Wrapper */}
+                <Animated.View style={[styles.changeComboDialWrapper, animatedDialWrapperStyle, glowBorderColorStyle]}>
+                  <CombinationDial
+                    onNumberChange={(num) => {
+                      setDialNumber(num);
+                      if (isDialActive) {
+                        setHasInteracted(true);
+                      }
+                    }}
+                    onInteractionChange={setIsDialActive}
+                    isLockedOut={false}
+                    value={dialRotation}
+                  />
+                </Animated.View>
+              </ScrollView>
+            ) : (
+              <View style={styles.changeComboSuccessContainer}>
+                <View style={styles.changeComboSuccessCircle}>
+                  <Ionicons name="checkmark-circle" size={80} color="#2ED8A5" />
+                </View>
+                <Text style={styles.changeComboSuccessTitle}>Passcode Updated</Text>
+                <Text style={styles.changeComboSuccessSubtitle}>
+                  Your C-Vault combination has been changed successfully. Write down or remember your new combination.
+                </Text>
+                <TouchableOpacity
+                  onPress={closeChangeComboModal}
+                  style={styles.changeComboSuccessButton}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.changeComboSuccessButtonText}>Done</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </GestureHandlerRootView>
       </Modal>
     </View>
   );
