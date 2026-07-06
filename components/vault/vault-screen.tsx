@@ -43,6 +43,7 @@ export const VaultScreen: React.FC = () => {
     unlockWithBiometrics,
     enableBiometrics,
     deleteAccount,
+    bypassUnlock,
   } = useVault();
 
   // Navigation / State of the Vault flows
@@ -108,8 +109,13 @@ export const VaultScreen: React.FC = () => {
     );
 
     setTimeout(() => {
-      // Check biometrics or combo screen
-      if (account.biometricsEnabled && hasBiometricsSupport) {
+      // Check if combination entry can be bypassed
+      if (account.passcodeDisabled) {
+        setViewState('success');
+        setTimeout(() => {
+          bypassUnlock(account);
+        }, 800);
+      } else if (account.biometricsEnabled && hasBiometricsSupport) {
         // Automatically attempt biometric unlock
         attemptBiometrics();
       } else {
@@ -119,7 +125,7 @@ export const VaultScreen: React.FC = () => {
       setDialNumber(0);
       dialRotation.value = 0;
     }, 1200);
-  }, [selectAccount, dialRotation, hasBiometricsSupport, attemptBiometrics]);
+  }, [selectAccount, dialRotation, hasBiometricsSupport, attemptBiometrics, bypassUnlock]);
 
 
 

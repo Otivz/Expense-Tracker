@@ -46,6 +46,7 @@ export default function SettingsScreen() {
     hasBiometricsSupport,
     biometryType,
     enableBiometrics,
+    disablePasscode,
     saveVaultCombination,
     verifyCombinationStep,
   } = useVault();
@@ -468,17 +469,22 @@ export default function SettingsScreen() {
                   <Ionicons name="lock-closed" size={20} color={colors.primary} />
                 </View>
                 <View>
-                  <Text style={[styles.rowTitle, { color: colors.text }]}>Passcode Protection</Text>
+                  <Text style={[styles.rowTitle, { color: colors.text }]}>Require Dial Passcode</Text>
                   <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>
-                    {currentAccount ? 'Always Active for vault accounts' : 'No active vault account'}
+                    {currentAccount ? 'Require combination to unlock vault' : 'No active vault account'}
                   </Text>
                 </View>
               </View>
               <Switch
-                value={currentAccount !== null}
-                disabled={true}
+                value={currentAccount ? !currentAccount.passcodeDisabled : false}
+                disabled={!currentAccount}
+                onValueChange={(val) => {
+                  if (currentAccount) {
+                    disablePasscode(currentAccount.id, !val);
+                  }
+                }}
                 trackColor={{ false: colors.divider, true: '#A0D3C7' }}
-                thumbColor={currentAccount ? colors.primary : '#CFD8DC'}
+                thumbColor={currentAccount && !currentAccount.passcodeDisabled ? colors.primary : '#CFD8DC'}
               />
             </View>
 
