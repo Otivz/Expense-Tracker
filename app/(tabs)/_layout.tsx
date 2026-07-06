@@ -21,7 +21,9 @@ export default function TabLayout() {
           backgroundColor: colors.card, // Card color from theme
           borderTopColor: colors.border, // Divider color from theme
           borderTopWidth: 1,
-          height: 52 + (insets.bottom > 0 ? insets.bottom : 12),
+          height: Platform.OS === 'ios'
+            ? 54 + (insets.bottom > 0 ? insets.bottom : 12)
+            : 60 + (insets.bottom > 0 ? insets.bottom : 12),
           paddingBottom: insets.bottom > 0 ? insets.bottom : 12,
           paddingTop: 8,
           elevation: 8,

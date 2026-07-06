@@ -5,6 +5,7 @@ import 'react-native-reanimated';
 import '@/utils/notifications';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SQLiteProvider } from 'expo-sqlite';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { SidebarProvider } from '@/context/sidebar-context';
@@ -44,19 +45,22 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <DatabaseErrorBoundary>
-        <SQLiteProvider databaseName="cvault.db" onInit={initializeDatabase}>
-          <DatabaseSuccessTracker />
-          <ThemeProvider>
-            <NavThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-              <VaultProvider>
-                <AppContent colorScheme={colorScheme ?? 'light'} />
-              </VaultProvider>
-            </NavThemeProvider>
-          </ThemeProvider>
-        </SQLiteProvider>
-      </DatabaseErrorBoundary>
+      <SafeAreaProvider>
+        <DatabaseErrorBoundary>
+          <SQLiteProvider databaseName="cvault.db" onInit={initializeDatabase}>
+            <DatabaseSuccessTracker />
+            <ThemeProvider>
+              <NavThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+                <VaultProvider>
+                  <AppContent colorScheme={colorScheme ?? 'light'} />
+                </VaultProvider>
+              </NavThemeProvider>
+            </ThemeProvider>
+          </SQLiteProvider>
+        </DatabaseErrorBoundary>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
+
 
