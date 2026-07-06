@@ -481,29 +481,6 @@ export default function SettingsScreen() {
                 </TouchableOpacity>
               </>
             )}
-
-            {currentAccount && hasBiometricsSupport && (
-              <>
-                <View style={[styles.divider, { backgroundColor: colors.divider }]} />
-                <View style={styles.row}>
-                  <View style={styles.rowLeft}>
-                    <View style={[styles.iconCircle, { backgroundColor: colors.primaryLight }]}>
-                      <Ionicons name="finger-print" size={20} color={colors.primary} />
-                    </View>
-                    <View>
-                      <Text style={[styles.rowTitle, { color: colors.text }]}>Unlock with {biometryType || 'Biometrics'}</Text>
-                      <Text style={[styles.rowSubtitle, { color: colors.textSecondary }]}>Use fingerprint or face recognition</Text>
-                    </View>
-                  </View>
-                  <Switch
-                    value={currentAccount.biometricsEnabled}
-                    onValueChange={(val) => enableBiometrics(currentAccount.id, val)}
-                    trackColor={{ false: colors.divider, true: '#A0D3C7' }}
-                    thumbColor={currentAccount.biometricsEnabled ? colors.primary : '#CFD8DC'}
-                  />
-                </View>
-              </>
-            )}
           </View>
         </View>
 
