@@ -1,5 +1,8 @@
 import { db } from './database';
 import { isSupabaseConfigured, supabase } from '../utils/supabase';
+import { Platform } from 'react-native';
+import { sha256 } from '@/utils/hash';
+import * as SecureStore from 'expo-secure-store';
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
@@ -12,11 +15,34 @@ function now(): string {
 export const syncManager = {
   isSyncing: false,
 
+  // ── Get active session, refreshing if needed ──────────────────────────────
+  async _getSession() {
+    if (!supabase) return null;
+    // First try getting existing session
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) return session;
+    // Session expired — try refreshing it
+    console.log('[Sync] Session expired, attempting refresh...');
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed?.session) {
+      console.log('[Sync] Session refreshed successfully.');
+      return refreshed.session;
+    }
+    return null;
+  },
+
   // ── PUSH: send all pending local changes up to Supabase ──────────────────
 
   async pushAll(userId: string): Promise<void> {
     if (this.isSyncing) return;
     if (!isSupabaseConfigured || !supabase) return;
+
+    // Guard: verify active session matches userId
+    const session = await this._getSession();
+    if (!session || session.user.id !== userId) {
+      console.warn('[Sync] pushAll skipped: no valid session for user', userId);
+      return;
+    }
 
     this.isSyncing = true;
     console.log('[Sync] Pushing local changes to Supabase...');
@@ -42,11 +68,12 @@ export const syncManager = {
       return;
     }
 
-    // Verify the active Supabase session matches the userId being synced
-    const { data: { session } } = await supabase.auth.getSession();
+    // Try to get or refresh session
+    const session = await this._getSession();
     if (!session || session.user.id !== userId) {
-      console.warn('[Sync] Skipped: No matching Supabase auth session for user', userId);
+      console.warn('[Sync] Skipped: No valid Supabase session for user', userId);
       console.warn('[Sync] auth.uid():', session?.user.id ?? 'none', '| local userId:', userId);
+      console.warn('[Sync] To fix: remove this vault account and sign in again to establish a fresh session.');
       return;
     }
 
@@ -174,6 +201,36 @@ export const syncManager = {
     if (!isSupabaseConfigured || !supabase) return;
 
     console.log('[Sync] Pulling data from Supabase...');
+    try {
+      // Get latest user metadata to pull any changed vault combination
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user && user.user_metadata?.vault_combination && Array.isArray(user.user_metadata.vault_combination)) {
+        const combination = user.user_metadata.vault_combination;
+        const comboString = combination.join(',');
+        const hash = sha256(comboString);
+        
+        const COMBINATION_PREFIX = 'cvault_combination_';
+        if (Platform.OS === 'web') {
+          localStorage.setItem(`${COMBINATION_PREFIX}${userId}`, hash);
+          for (let i = 1; i <= 4; i++) {
+            const subCombo = combination.slice(0, i).join(',');
+            const stepHash = sha256(subCombo);
+            localStorage.setItem(`${COMBINATION_PREFIX}${userId}_step_${i}`, stepHash);
+          }
+        } else {
+          await SecureStore.setItemAsync(`${COMBINATION_PREFIX}${userId}`, hash);
+          for (let i = 1; i <= 4; i++) {
+            const subCombo = combination.slice(0, i).join(',');
+            const stepHash = sha256(subCombo);
+            await SecureStore.setItemAsync(`${COMBINATION_PREFIX}${userId}_step_${i}`, stepHash);
+          }
+        }
+        console.log('[Sync] Vault combination hash updated locally from Supabase user metadata.');
+      }
+    } catch (metaErr) {
+      console.warn('[Sync] Failed to sync latest vault combination metadata:', metaErr);
+    }
+
     try {
       await this._pullAccounts(userId);
       await this._pullCategories(userId);

@@ -14,6 +14,7 @@ export interface VaultAccount {
   email: string;
   lastActive: string;
   biometricsEnabled: boolean;
+  passcodeDisabled?: boolean;
 }
 
 interface VaultContextType {
@@ -33,6 +34,8 @@ interface VaultContextType {
   addAccount: (user: { id: string; email: string; name: string }) => Promise<VaultAccount>;
   deleteAccount: (accountId: string) => Promise<void>;
   enableBiometrics: (accountId: string, enabled: boolean) => Promise<void>;
+  disablePasscode: (accountId: string, disabled: boolean) => Promise<void>;
+  bypassUnlock: (account: VaultAccount) => void;
   unlockWithBiometrics: () => Promise<boolean>;
   lockVault: () => void;
   clearAllVaultData: () => Promise<void>; // Utility for resetting
@@ -290,6 +293,40 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
+  const disablePasscode = async (accountId: string, disabled: boolean) => {
+    const newList = accounts.map((a) => {
+      if (a.id === accountId) {
+        return { ...a, passcodeDisabled: disabled };
+      }
+      return a;
+    });
+    await setItemSecure(ACCOUNTS_LIST_KEY, JSON.stringify(newList));
+    setAccounts(newList);
+    if (currentAccount?.id === accountId) {
+      setCurrentAccount({ ...currentAccount, passcodeDisabled: disabled });
+    }
+  };
+
+  const bypassUnlock = async (account: VaultAccount) => {
+    setIsUnlocked(true);
+
+    const nowStr = new Date().toISOString();
+    const newList = accounts.map((a) => {
+      if (a.id === account.id) {
+        return { ...a, lastActive: nowStr };
+      }
+      return a;
+    });
+    await setItemSecure(ACCOUNTS_LIST_KEY, JSON.stringify(newList));
+    setAccounts(newList);
+    setCurrentAccount({ ...account, lastActive: nowStr });
+
+    // Sync in background since we unlocked
+    syncManager.forceSyncAll(account.id).catch((err) =>
+      console.warn('[Vault] Sync on bypass unlock failed:', err)
+    );
+  };
+
   const saveVaultCombination = async (combination: number[]) => {
     if (!currentAccount) throw new Error('No account selected.');
 
@@ -317,13 +354,28 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // Sync to Supabase user metadata (for multi-device sync)
     try {
       if (isSupabaseConfigured && supabase) {
-        const { error } = await supabase.auth.updateUser({
-          data: { vault_combination: combination }
-        });
-        if (error) {
-          console.error('Failed to sync combination to Supabase metadata:', error.message);
+        // Attempt to verify and refresh session if needed
+        let session = null;
+        const { data: { session: existing } } = await supabase.auth.getSession();
+        session = existing;
+        
+        if (!session) {
+          console.log('[Vault] Session expired, attempting refresh before combination update...');
+          const { data: refreshed } = await supabase.auth.refreshSession();
+          session = refreshed?.session;
+        }
+
+        if (session) {
+          const { error } = await supabase.auth.updateUser({
+            data: { vault_combination: combination }
+          });
+          if (error) {
+            console.error('Failed to sync combination to Supabase metadata:', error.message);
+          } else {
+            console.log('Vault combination successfully synced to Supabase metadata.');
+          }
         } else {
-          console.log('Vault combination successfully synced to Supabase metadata.');
+          console.warn('Failed to sync combination to Supabase metadata: No valid Auth session.');
         }
       }
     } catch (supabaseErr) {
@@ -469,6 +521,8 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         addAccount,
         deleteAccount,
         enableBiometrics,
+        disablePasscode,
+        bypassUnlock,
         unlockWithBiometrics,
         lockVault,
         clearAllVaultData,
