@@ -127,6 +127,8 @@ export default function SettingsScreen() {
     loadSettings();
   }, []);
 
+
+
   const handleToggleReminder = async (value: boolean) => {
     if (value) {
       const granted = await requestNotificationPermissions();
@@ -339,6 +341,20 @@ export default function SettingsScreen() {
       }
     }
   };
+
+  // Handle dial pause verification (500ms) for Change Combo Flow
+  useEffect(() => {
+    if (!isChangeComboModalVisible) return;
+    if (changeComboStep !== 'verify' && changeComboStep !== 'setup') return;
+    if (!hasInteracted) return;
+    if (isDialActive) return; // Wait until they stop dragging
+
+    const timer = setTimeout(() => {
+      handleChangeNumberStabilized(dialNumber);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [dialNumber, isChangeComboModalVisible, changeComboStep, handleChangeNumberStabilized, hasInteracted, isDialActive]);
 
   // Reanimated style definitions
   const animatedDialWrapperStyle = useAnimatedStyle(() => {
