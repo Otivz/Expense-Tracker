@@ -183,7 +183,21 @@ export async function signInWithEmail(email: string, password: string): Promise<
   });
 
   if (error) {
-    throw new Error(error.message);
+    const msg = error.message?.toLowerCase() ?? '';
+    if (msg.includes('invalid login') || msg.includes('invalid credentials') || msg.includes('wrong password')) {
+      throw new Error('Incorrect email or password. Please try again.');
+    }
+    if (msg.includes('email not confirmed')) {
+      throw new Error('Please confirm your email address before signing in. Check your inbox.');
+    }
+    if (msg.includes('rate limit') || msg.includes('too many')) {
+      throw new Error('Too many attempts. Please wait a moment and try again.');
+    }
+    // Fallback: strip raw JSON/HTML
+    const clean = error.message?.length > 120
+      ? 'Sign in failed. Please try again.'
+      : error.message;
+    throw new Error(clean);
   }
 
   if (!data.user) {
@@ -248,7 +262,23 @@ export async function signUpWithEmail(email: string, password: string, name: str
   });
 
   if (error) {
-    throw new Error(error.message);
+    const status = (error as any).status;
+    const msg = error.message?.toLowerCase() ?? '';
+
+    if (status === 500 || msg.includes('user already registered') || msg.includes('already exists') || msg.includes('already been registered')) {
+      throw new Error('An account with this email already exists. Please sign in instead.');
+    }
+    if (status === 429 || msg.includes('rate limit') || msg.includes('too many')) {
+      throw new Error('Too many attempts. Please wait a moment and try again.');
+    }
+    if (msg.includes('invalid email')) {
+      throw new Error('Please enter a valid email address.');
+    }
+    // Fallback: strip raw JSON/HTML from message
+    const clean = error.message?.length > 120
+      ? 'Something went wrong. Please try again.'
+      : error.message;
+    throw new Error(clean);
   }
 
   if (!data.user) {
@@ -350,7 +380,7 @@ export async function sendPasswordResetEmail(email: string): Promise<void> {
 }
 
 /**
- * Sends a 6-digit OTP code to the user's email for verification (requires internet)
+ * Sends an OTP code to the user's email for verification (requires internet)
  */
 export async function sendOtpCode(email: string): Promise<void> {
   if (!isSupabaseConfigured || !supabase) {
@@ -359,12 +389,17 @@ export async function sendOtpCode(email: string): Promise<void> {
 
   const { error } = await supabase.auth.signInWithOtp({
     email: email.trim().toLowerCase(),
-    options: {
-      shouldCreateUser: false, // Don't sign up new users during vault reset
-    },
   });
 
   if (error) {
+    // status 500 or 422 = email not registered in Supabase (local/offline account)
+    const status = (error as any).status;
+    if (status === 500 || status === 422 || error.message?.toLowerCase().includes('user')) {
+      throw new Error(
+        'ACCOUNT_NOT_FOUND: This account was created offline and has no Supabase record. ' +
+        'Email verification is only available for accounts that signed up with internet access.'
+      );
+    }
     throw new Error(error.message);
   }
 }

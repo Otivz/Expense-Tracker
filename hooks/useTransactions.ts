@@ -206,7 +206,7 @@ export function useTransactions() {
       await loadTransactions();
 
       // Trigger cloud synchronizer
-      syncManager.syncTransactions(userId).catch((err) => {
+      syncManager.pushAll(userId).catch((err: any) => {
         console.warn('Background sync warning:', err);
       });
     } catch (err) {
@@ -240,7 +240,7 @@ export function useTransactions() {
 
       await loadTransactions();
 
-      syncManager.syncTransactions(userId).catch((err) => {
+      syncManager.pushAll(userId).catch((err: any) => {
         console.warn('Background sync warning:', err);
       });
     } catch (err) {

@@ -384,7 +384,15 @@ export const VaultScreen: React.FC = () => {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => { });
       }
     } catch (e: any) {
-      setResetError(e.message || 'Failed to send verification code. Please try again.');
+      const msg: string = e.message || '';
+      if (msg.startsWith('ACCOUNT_NOT_FOUND:')) {
+        setResetError(
+          'This account was not signed up through Supabase. ' +
+          'Forgot Combination via email is only available for accounts created while connected to the internet.'
+        );
+      } else {
+        setResetError(msg || 'Failed to send verification code. Please try again.');
+      }
       if (Platform.OS !== 'web') {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => { });
       }
@@ -396,7 +404,7 @@ export const VaultScreen: React.FC = () => {
   const handleVerifyResetOtp = async () => {
     setResetError('');
     if (otpCode.length < 6) {
-      setResetError('Please enter the 6-digit verification code.');
+      setResetError('Please enter the verification code sent to your email.');
       return;
     }
 
@@ -800,7 +808,7 @@ export const VaultScreen: React.FC = () => {
           <Text style={styles.mainTitle}>{otpSent ? 'Enter Code' : 'Verify Owner'}</Text>
           <Text style={styles.subtitle}>
             {otpSent
-              ? `Enter the 6-digit code sent to ${resetEmail}.`
+              ? `Enter the verification code sent to ${resetEmail}.`
               : 'Enter the email linked to this vault to reset combination.'}
           </Text>
         </View>
@@ -836,10 +844,10 @@ export const VaultScreen: React.FC = () => {
             <>
               <TextInput
                 style={styles.input}
-                placeholder="6-Digit Code"
+                placeholder="Verification Code"
                 placeholderTextColor="#A8B3AF"
                 keyboardType="number-pad"
-                maxLength={6}
+                maxLength={8}
                 value={otpCode}
                 onChangeText={setOtpCode}
                 editable={!otpLoading}

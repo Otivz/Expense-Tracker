@@ -1,4 +1,5 @@
 import { userRepository } from '@/db/repositories/userRepository';
+import { syncManager } from '@/db/sync';
 import { sha256 } from '@/utils/hash';
 import { supabase, isSupabaseConfigured } from '@/utils/supabase';
 import * as Haptics from 'expo-haptics';
@@ -228,6 +229,15 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           email: user.email,
         });
         console.log('User synced to SQLite database:', user.id);
+        // New device: pull all cloud data into local SQLite
+        syncManager.pullAll(user.id).catch(err =>
+          console.warn('[Vault] Pull on new account failed silently:', err)
+        );
+      } else {
+        // Existing user on this device: push any pending changes
+        syncManager.pushAll(user.id).catch(err =>
+          console.warn('[Vault] Push on login failed silently:', err)
+        );
       }
     } catch (dbErr) {
       console.error('Failed to sync user to SQLite database:', dbErr);
@@ -358,6 +368,12 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       await setItemSecure(ACCOUNTS_LIST_KEY, JSON.stringify(newList));
       setAccounts(newList);
       setCurrentAccount({ ...currentAccount, lastActive: nowStr });
+
+      // Auto-sync: force-push ALL local data then pull latest from cloud
+      syncManager.forceSyncAll(currentAccount.id).catch(err =>
+        console.warn('[Vault] Sync on unlock failed silently:', err)
+      );
+
       return true;
     } else {
       // Fail
