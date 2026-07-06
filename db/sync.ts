@@ -12,11 +12,34 @@ function now(): string {
 export const syncManager = {
   isSyncing: false,
 
+  // ── Get active session, refreshing if needed ──────────────────────────────
+  async _getSession() {
+    if (!supabase) return null;
+    // First try getting existing session
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) return session;
+    // Session expired — try refreshing it
+    console.log('[Sync] Session expired, attempting refresh...');
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed?.session) {
+      console.log('[Sync] Session refreshed successfully.');
+      return refreshed.session;
+    }
+    return null;
+  },
+
   // ── PUSH: send all pending local changes up to Supabase ──────────────────
 
   async pushAll(userId: string): Promise<void> {
     if (this.isSyncing) return;
     if (!isSupabaseConfigured || !supabase) return;
+
+    // Guard: verify active session matches userId
+    const session = await this._getSession();
+    if (!session || session.user.id !== userId) {
+      console.warn('[Sync] pushAll skipped: no valid session for user', userId);
+      return;
+    }
 
     this.isSyncing = true;
     console.log('[Sync] Pushing local changes to Supabase...');
@@ -42,11 +65,12 @@ export const syncManager = {
       return;
     }
 
-    // Verify the active Supabase session matches the userId being synced
-    const { data: { session } } = await supabase.auth.getSession();
+    // Try to get or refresh session
+    const session = await this._getSession();
     if (!session || session.user.id !== userId) {
-      console.warn('[Sync] Skipped: No matching Supabase auth session for user', userId);
+      console.warn('[Sync] Skipped: No valid Supabase session for user', userId);
       console.warn('[Sync] auth.uid():', session?.user.id ?? 'none', '| local userId:', userId);
+      console.warn('[Sync] To fix: remove this vault account and sign in again to establish a fresh session.');
       return;
     }
 
