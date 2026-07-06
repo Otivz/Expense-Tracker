@@ -354,13 +354,28 @@ export const VaultProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // Sync to Supabase user metadata (for multi-device sync)
     try {
       if (isSupabaseConfigured && supabase) {
-        const { error } = await supabase.auth.updateUser({
-          data: { vault_combination: combination }
-        });
-        if (error) {
-          console.error('Failed to sync combination to Supabase metadata:', error.message);
+        // Attempt to verify and refresh session if needed
+        let session = null;
+        const { data: { session: existing } } = await supabase.auth.getSession();
+        session = existing;
+        
+        if (!session) {
+          console.log('[Vault] Session expired, attempting refresh before combination update...');
+          const { data: refreshed } = await supabase.auth.refreshSession();
+          session = refreshed?.session;
+        }
+
+        if (session) {
+          const { error } = await supabase.auth.updateUser({
+            data: { vault_combination: combination }
+          });
+          if (error) {
+            console.error('Failed to sync combination to Supabase metadata:', error.message);
+          } else {
+            console.log('Vault combination successfully synced to Supabase metadata.');
+          }
         } else {
-          console.log('Vault combination successfully synced to Supabase metadata.');
+          console.warn('Failed to sync combination to Supabase metadata: No valid Auth session.');
         }
       }
     } catch (supabaseErr) {

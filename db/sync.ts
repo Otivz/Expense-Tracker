@@ -1,5 +1,8 @@
 import { db } from './database';
 import { isSupabaseConfigured, supabase } from '../utils/supabase';
+import { Platform } from 'react-native';
+import { sha256 } from '@/utils/hash';
+import * as SecureStore from 'expo-secure-store';
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
@@ -198,6 +201,36 @@ export const syncManager = {
     if (!isSupabaseConfigured || !supabase) return;
 
     console.log('[Sync] Pulling data from Supabase...');
+    try {
+      // Get latest user metadata to pull any changed vault combination
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user && user.user_metadata?.vault_combination && Array.isArray(user.user_metadata.vault_combination)) {
+        const combination = user.user_metadata.vault_combination;
+        const comboString = combination.join(',');
+        const hash = sha256(comboString);
+        
+        const COMBINATION_PREFIX = 'cvault_combination_';
+        if (Platform.OS === 'web') {
+          localStorage.setItem(`${COMBINATION_PREFIX}${userId}`, hash);
+          for (let i = 1; i <= 4; i++) {
+            const subCombo = combination.slice(0, i).join(',');
+            const stepHash = sha256(subCombo);
+            localStorage.setItem(`${COMBINATION_PREFIX}${userId}_step_${i}`, stepHash);
+          }
+        } else {
+          await SecureStore.setItemAsync(`${COMBINATION_PREFIX}${userId}`, hash);
+          for (let i = 1; i <= 4; i++) {
+            const subCombo = combination.slice(0, i).join(',');
+            const stepHash = sha256(subCombo);
+            await SecureStore.setItemAsync(`${COMBINATION_PREFIX}${userId}_step_${i}`, stepHash);
+          }
+        }
+        console.log('[Sync] Vault combination hash updated locally from Supabase user metadata.');
+      }
+    } catch (metaErr) {
+      console.warn('[Sync] Failed to sync latest vault combination metadata:', metaErr);
+    }
+
     try {
       await this._pullAccounts(userId);
       await this._pullCategories(userId);
