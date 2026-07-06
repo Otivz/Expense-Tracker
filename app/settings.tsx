@@ -274,6 +274,7 @@ export default function SettingsScreen() {
           setEnteredCombo([]);
           setDialNumber(0);
           dialRotation.value = 0;
+          setHasInteracted(false);
           setStatusMessage('Verified! Choose 4 new numbers to secure your safe.');
         } else {
           setStatusMessage('Number accepted. Rotate to next.');
